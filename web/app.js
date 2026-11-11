@@ -106,6 +106,67 @@ speed.addEventListener("change", async () => {
   paint(await post("/api/speed", { speed: Number(speed.value) }));
 });
 
+let alertTimer = null;
+
+function showAlert(message) {
+  errorEl.textContent = message;
+  errorEl.classList.add("show");
+  clearTimeout(alertTimer);
+  alertTimer = setTimeout(() => {
+    errorEl.classList.remove("show");
+  }, 3000);
+}
+
+function hideAlert() {
+  clearTimeout(alertTimer);
+  errorEl.classList.remove("show");
+}
+
+function nextFieldValue(input, insert) {
+  const start = input.selectionStart ?? input.value.length;
+  const end = input.selectionEnd ?? input.value.length;
+  return input.value.slice(0, start) + insert + input.value.slice(end);
+}
+
+function allowOnly(input, accepts, message) {
+  input.addEventListener("beforeinput", (event) => {
+    if (event.inputType && event.inputType.startsWith("delete")) return;
+    const insert = event.data ?? "";
+    if (accepts(nextFieldValue(input, insert))) return;
+    event.preventDefault();
+    showAlert(message);
+  });
+  input.addEventListener("input", () => {
+    if (accepts(input.value)) {
+      input.dataset.lastGood = input.value;
+      return;
+    }
+    input.value = input.dataset.lastGood || "";
+    showAlert(message);
+  });
+}
+
+allowOnly(fields.start_delay, (text) => text === "" || text === "1" || text === "2" || text === "3", "Start delay must be 1, 2, or 3.");
+allowOnly(fields.default_speed, (text) => speedTextOk(text), "Default speed must be a number from 1 to 30.");
+allowOnly(fields.mistake_frequency, (text) => frequencyTextOk(text), "Mistake frequency must be a number from 0 to 10.");
+allowOnly(fields.mistake_length, (text) => text === "" || /^[0-5]$/.test(text), "Mistake length must be a number from 0 to 5.");
+
+function speedTextOk(text) {
+  if (text === "") return true;
+  if (!/^\d+$/.test(text) || (text.length > 1 && text.startsWith("0"))) return false;
+  const value = Number(text);
+  if (text.length === 1) return value >= 1 && value <= 9;
+  return text.length === 2 && value >= 10 && value <= 30;
+}
+
+function frequencyTextOk(text) {
+  if (text === "") return true;
+  if (!/^\d+$/.test(text) || (text.length > 1 && text.startsWith("0"))) return false;
+  const value = Number(text);
+  if (text.length === 1) return value >= 0 && value <= 9;
+  return text.length === 2 && value === 10;
+}
+
 document.querySelector("#open-settings").addEventListener("click", async () => {
   if (!state) return;
   const s = state.settings;
@@ -115,7 +176,10 @@ document.querySelector("#open-settings").addEventListener("click", async () => {
   fields.mistake_length.value = s.mistake_length;
   fields.start_hotkey.value = s.start_hotkey;
   fields.reset_hotkey.value = s.reset_hotkey;
-  errorEl.hidden = true;
+  for (const input of [fields.start_delay, fields.default_speed, fields.mistake_frequency, fields.mistake_length]) {
+    input.dataset.lastGood = input.value;
+  }
+  hideAlert();
   await post("/api/hotkeys", { suspended: true });
   dialog.showModal();
 });
@@ -132,7 +196,7 @@ document.querySelector("#cancel-settings").addEventListener("click", closeSettin
 
 form.addEventListener("submit", async (event) => {
   event.preventDefault();
-  errorEl.hidden = true;
+  hideAlert();
   try {
     const saved = await post("/api/settings", {
       start_delay: fields.start_delay.value,
@@ -146,8 +210,7 @@ form.addEventListener("submit", async (event) => {
     paint(saved);
     await closeSettings();
   } catch (error) {
-    errorEl.textContent = error.message;
-    errorEl.hidden = false;
+    showAlert(error.message);
   }
 });
 
@@ -160,6 +223,12 @@ document.querySelectorAll(".hotkey").forEach((input) => {
   });
 });
 
+dialog.addEventListener("cancel", (event) => {
+  if (!errorEl.classList.contains("show")) return;
+  event.preventDefault();
+  hideAlert();
+});
+
 document.addEventListener("keydown", (event) => {
   if (listening) {
     event.preventDefault();
@@ -170,8 +239,7 @@ document.addEventListener("keydown", (event) => {
     if (event.altKey) names.push("Alt");
     if (event.metaKey) names.push("Win");
     if (names.length === 0) {
-      errorEl.textContent = "Use a shortcut such as Ctrl+Up, not a single character like s.";
-      errorEl.hidden = false;
+      showAlert("Use a shortcut such as Ctrl+Up, not a single character like s.");
       listening.value = listening.dataset.previous || "";
       listening.classList.remove("listening");
       listening = null;
