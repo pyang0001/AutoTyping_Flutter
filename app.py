@@ -135,6 +135,7 @@ def main() -> None:
         height=660,
         min_size=(900, 600),
         background_color="#1C1F2B",
+        text_select=True,
         on_top=bool(ENGINE.settings.get("always_on_top")),
     )
     try:

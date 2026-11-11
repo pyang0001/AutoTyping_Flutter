@@ -46,9 +46,8 @@ function paint(next) {
   pauseIcon.classList.toggle("is-hidden", !running);
   play.setAttribute("aria-label", running ? "Pause" : "Start");
   text.readOnly = running;
-  if (document.activeElement !== text && text.value !== next.text) {
-    text.value = next.text;
-  }
+  const editingText = document.activeElement === text || editTarget === text;
+  if (!editingText && text.value !== next.text) text.value = next.text;
   if (!dragging) paintSpeed(next.speed);
   const s = next.settings;
   shortcuts.textContent = s.start_hotkey + " Start / Pause    " + s.reset_hotkey + " Reset";
@@ -109,18 +108,25 @@ speed.addEventListener("change", async () => {
 let alertTimer = null;
 
 function showAlert(message) {
-  errorEl.textContent = message;
-  errorEl.classList.add("show");
   clearTimeout(alertTimer);
-  alertTimer = setTimeout(() => {
-    errorEl.classList.remove("show");
-  }, 3000);
+  errorEl.textContent = message;
+  errorEl.classList.remove("show", "leaving");
+  void errorEl.offsetWidth;
+  errorEl.classList.add("show");
+  alertTimer = setTimeout(hideAlert, 3000);
 }
 
 function hideAlert() {
   clearTimeout(alertTimer);
+  alertTimer = null;
+  if (!errorEl.classList.contains("show")) return;
   errorEl.classList.remove("show");
+  errorEl.classList.add("leaving");
 }
+
+errorEl.addEventListener("animationend", () => {
+  if (!errorEl.classList.contains("show")) errorEl.classList.remove("leaving");
+});
 
 function nextFieldValue(input, insert) {
   const start = input.selectionStart ?? input.value.length;
@@ -229,7 +235,23 @@ dialog.addEventListener("cancel", (event) => {
   hideAlert();
 });
 
+function isEditShortcut(event) {
+  const key = event.key.toLowerCase();
+  if ((event.ctrlKey || event.metaKey) && !event.altKey && ["a", "c", "v", "x", "z", "y"].includes(key)) return true;
+  if (event.shiftKey && (event.key === "Insert" || event.key === "Delete")) return true;
+  return event.ctrlKey && event.key === "Insert";
+}
+
 document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape" && !editMenu.hidden) {
+    event.preventDefault();
+    event.stopPropagation();
+    closeEditMenu();
+    return;
+  }
+  const field = event.target;
+  const inField = field instanceof HTMLTextAreaElement || field instanceof HTMLInputElement;
+  if (inField && !field.classList.contains("hotkey") && isEditShortcut(event)) return;
   if (listening) {
     event.preventDefault();
     if (["Control", "Shift", "Alt", "Meta"].includes(event.key)) return;
@@ -293,6 +315,108 @@ function chordFromEvent(event) {
   names.push(keyName(event));
   return names.join("+");
 }
+
+const editMenu = document.querySelector("#edit-menu");
+let editTarget = null;
+
+function closeEditMenu() {
+  editMenu.hidden = true;
+  editTarget = null;
+}
+
+function writeClipboard(value) {
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    return navigator.clipboard.writeText(value).catch(() => {});
+  }
+  return Promise.resolve();
+}
+
+async function readClipboard() {
+  if (navigator.clipboard && navigator.clipboard.readText) {
+    try {
+      return await navigator.clipboard.readText();
+    } catch (error) {
+      return "";
+    }
+  }
+  return "";
+}
+
+function replaceSelection(target, insert) {
+  const start = target.selectionStart ?? target.value.length;
+  const end = target.selectionEnd ?? start;
+  target.setRangeText(insert, start, end, "end");
+  target.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertFromPaste", data: insert }));
+}
+
+document.querySelectorAll("#text, .row input").forEach((field) => {
+  field.addEventListener("contextmenu", (event) => {
+    if (field.classList.contains("hotkey")) return;
+    event.preventDefault();
+    editTarget = field;
+    const locked = field.readOnly || field.disabled;
+    editMenu.querySelector("[data-edit='cut']").disabled = locked;
+    editMenu.querySelector("[data-edit='paste']").disabled = locked;
+    const menuWidth = 148;
+    const menuHeight = 156;
+    const x = Math.min(event.clientX, window.innerWidth - menuWidth - 8);
+    const y = Math.min(event.clientY, window.innerHeight - menuHeight - 8);
+    editMenu.style.left = Math.max(8, x) + "px";
+    editMenu.style.top = Math.max(8, y) + "px";
+    editMenu.hidden = false;
+  });
+});
+
+editMenu.addEventListener("pointerdown", (event) => {
+  event.preventDefault();
+});
+
+editMenu.addEventListener("click", async (event) => {
+  const button = event.target.closest("[data-edit]");
+  const target = editTarget;
+  const command = button && target ? button.dataset.edit : "";
+  closeEditMenu();
+  if (!target || !command) return;
+  target.focus();
+  const start = target.selectionStart ?? 0;
+  const end = target.selectionEnd ?? 0;
+  const selected = target.value.slice(start, end);
+  if (command === "selectAll") {
+    target.select();
+    return;
+  }
+  if (command === "copy") {
+    if (!selected) return;
+    if (!document.execCommand("copy")) await writeClipboard(selected);
+    return;
+  }
+  if (command === "cut") {
+    if (target.readOnly || !selected) return;
+    if (document.execCommand("cut")) {
+      target.dispatchEvent(new Event("input", { bubbles: true }));
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(selected);
+    } catch (error) {
+      return;
+    }
+    replaceSelection(target, "");
+    return;
+  }
+  if (command === "paste") {
+    if (target.readOnly) return;
+    if (document.execCommand("paste")) return;
+    const clip = await readClipboard();
+    if (clip) replaceSelection(target, clip);
+  }
+});
+
+document.addEventListener("pointerdown", (event) => {
+  if (!editMenu.hidden && !editMenu.contains(event.target)) closeEditMenu();
+});
+
+window.addEventListener("blur", closeEditMenu);
 
 refresh().catch(() => {});
 setInterval(() => refresh().catch(() => {}), 300);
