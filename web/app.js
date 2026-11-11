@@ -50,26 +50,20 @@ let pauseView = "";
 
 function renderHighlight(value, greenAt) {
   const green = Math.max(0, Math.min(greenAt, value.length));
-  const selecting = document.activeElement === text && text.selectionStart !== text.selectionEnd;
-  const covered = state && state.phase === "paused" && state.pause_reason === "user" && !editingPaused;
-  let caretAt = green;
-  if (!selecting && !(state && state.running) && document.activeElement === text) {
-    caretAt = Math.max(0, Math.min(text.selectionStart, value.length));
-  }
   const caret = '<span class="caret"></span>';
-  let html;
-  if (selecting || covered) {
-    html = '<span class="typed">' + escapeHtml(value.slice(0, green)) + "</span>" + escapeHtml(value.slice(green));
-  } else if (caretAt <= green) {
-    html = '<span class="typed">' + escapeHtml(value.slice(0, caretAt)) + "</span>" + caret +
-      '<span class="typed">' + escapeHtml(value.slice(caretAt, green)) + "</span>" + escapeHtml(value.slice(green));
-  } else {
-    html = '<span class="typed">' + escapeHtml(value.slice(0, green)) + "</span>" +
-      escapeHtml(value.slice(green, caretAt)) + caret + escapeHtml(value.slice(caretAt));
-  }
-  highlight.innerHTML = html;
+  highlight.innerHTML = '<span class="typed">' + escapeHtml(value.slice(0, green)) + "</span>" +
+    caret + escapeHtml(value.slice(green));
   highlight.scrollTop = text.scrollTop;
   highlight.scrollLeft = text.scrollLeft;
+  syncEditCaret();
+}
+
+function syncEditCaret() {
+  const at = savedPrefix.length;
+  const collapsed = text.selectionStart === text.selectionEnd;
+  const editingElsewhere = collapsed && text.selectionStart !== at &&
+    document.activeElement === text && state && !state.running;
+  text.style.caretColor = editingElsewhere ? "#f4f6fb" : "transparent";
 }
 
 function rememberText(value, index) {
@@ -92,13 +86,15 @@ function paint(next) {
   phaseEl.textContent = label(next.phase);
   phaseEl.classList.toggle("paused", next.phase === "paused");
   phaseEl.classList.toggle("starting", next.phase === "waiting");
+  phaseEl.classList.toggle("typing", next.phase === "typing");
   const userPaused = next.phase === "paused" && next.pause_reason === "user";
   const focusPaused = next.phase === "paused" && next.pause_reason === "focus";
-  const view = userPaused ? "user" : "";
+  const coveredPause = userPaused || focusPaused;
+  const view = coveredPause ? "paused" : "";
   if (view !== pauseView) editingPaused = false;
   pauseView = view;
-  document.querySelector("#pause-mark").hidden = !(userPaused && !editingPaused);
-  document.querySelector("#focus-pause").hidden = !(focusPaused || (userPaused && editingPaused));
+  document.querySelector("#pause-mark").hidden = !(coveredPause && !editingPaused);
+  document.querySelector("#focus-pause").hidden = !(coveredPause && editingPaused);
   const countdown = document.querySelector("#count-overlay");
   countdown.hidden = next.phase !== "waiting";
   countdown.textContent = String(next.seconds_left || 1);
@@ -123,13 +119,15 @@ function paint(next) {
   let status = "";
   if (next.phase === "waiting") {
     status = "Starting in " + (next.seconds_left || 1) + " s - click where you want to type";
+  } else if (next.phase === "typing") {
+    status = "Typing...";
   } else if (focusPaused) {
     status = "Paused: the window being typed into lost focus. Press " + s.start_hotkey + ", then click where to type.";
   } else if (userPaused) {
     status = "Paused - press " + s.start_hotkey + " to resume";
   }
   shortcuts.textContent = status || (s.start_hotkey + " Start / Pause    " + s.reset_hotkey + " Reset");
-  shortcuts.classList.toggle("status", !!status);
+  shortcuts.classList.toggle("status", next.phase === "waiting" || next.phase === "paused");
   if (document.activeElement !== onTop) onTop.checked = !!s.always_on_top;
 }
 
@@ -184,7 +182,8 @@ text.addEventListener("input", () => {
 });
 
 text.addEventListener("pointerdown", () => {
-  if (!state || state.phase !== "paused" || state.pause_reason !== "user" || editingPaused) return;
+  if (!state || state.phase !== "paused" || editingPaused) return;
+  if (state.pause_reason !== "user" && state.pause_reason !== "focus") return;
   editingPaused = true;
   paint(state);
 });
@@ -195,6 +194,147 @@ text.addEventListener("scroll", () => {
 });
 
 let cursorTimer = null;
+let caretBeforeKey = null;
+let draggingCaret = false;
+let suppressClick = false;
+let progressToken = 0;
+
+function moveProgress(index) {
+  if (!state || state.running || text.value !== lastValue) return;
+  const at = Math.max(0, Math.min(index, text.value.length));
+  if (at === savedPrefix.length && pendingIndex === null) return;
+  const token = ++progressToken;
+  savedPrefix = text.value.slice(0, at);
+  pendingIndex = at;
+  if (text.selectionStart < at || text.selectionEnd < at) {
+    ignoreSelection = true;
+    text.setSelectionRange(at, at);
+    ignoreSelection = false;
+  }
+  renderHighlight(text.value, at);
+  countEl.textContent = at + "/" + text.value.length;
+  clearTimeout(cursorTimer);
+  cursorTimer = setTimeout(() => {
+    if (!state || state.running || text.value !== lastValue) return;
+    post("/api/index", { index: at }).then((next) => {
+      if (token !== progressToken) return;
+      pendingIndex = null;
+      paint(next);
+    }).catch(() => {
+      if (token === progressToken) pendingIndex = null;
+    });
+  }, 40);
+}
+
+function indexFromPoint(x, y) {
+  const mark = highlight.querySelector(".caret");
+  if (mark) mark.classList.add("pass");
+  const highlightEvents = highlight.style.pointerEvents;
+  const textEvents = text.style.pointerEvents;
+  highlight.style.pointerEvents = "auto";
+  text.style.pointerEvents = "none";
+  const range = document.caretRangeFromPoint ? document.caretRangeFromPoint(x, y) : null;
+  highlight.style.pointerEvents = highlightEvents;
+  text.style.pointerEvents = textEvents;
+  if (mark) mark.classList.remove("pass");
+  if (!range) return null;
+  if (range.startContainer === text) return range.startOffset;
+  if (!highlight.contains(range.startContainer) || range.startContainer.nodeType !== Node.TEXT_NODE) return null;
+  const walker = document.createTreeWalker(highlight, NodeFilter.SHOW_TEXT);
+  let count = 0;
+  let current = walker.nextNode();
+  while (current) {
+    if (current === range.startContainer) return count + range.startOffset;
+    count += current.textContent.length;
+    current = walker.nextNode();
+  }
+  return null;
+}
+
+document.querySelector("#pause-mark").addEventListener("pointerdown", (event) => {
+  event.preventDefault();
+  event.stopPropagation();
+  if (!state || state.phase !== "paused") return;
+  editingPaused = true;
+  paint(state);
+  text.focus();
+  const at = savedPrefix.length;
+  ignoreSelection = true;
+  text.setSelectionRange(at, at);
+  ignoreSelection = false;
+  syncEditCaret();
+});
+
+function keepEditCaretInUntyped() {
+  if (!state || state.running || text.selectionStart !== text.selectionEnd) return;
+  if (text.selectionStart >= savedPrefix.length) {
+    syncEditCaret();
+    return;
+  }
+  ignoreSelection = true;
+  text.setSelectionRange(savedPrefix.length, savedPrefix.length);
+  ignoreSelection = false;
+  syncEditCaret();
+}
+
+document.addEventListener("pointerdown", (event) => {
+  if (!event.target.closest || !event.target.closest(".caret")) return;
+  if (!state || state.running) return;
+  event.preventDefault();
+  const cover = document.querySelector("#pause-mark");
+  if (cover && !cover.hidden) {
+    editingPaused = true;
+    paint(state);
+    text.focus();
+    return;
+  }
+  draggingCaret = true;
+  suppressClick = true;
+  document.body.classList.add("dragging-caret");
+});
+
+document.addEventListener("pointermove", (event) => {
+  if (!draggingCaret) return;
+  const at = indexFromPoint(event.clientX, event.clientY);
+  if (at === null) return;
+  moveProgress(at);
+});
+
+function endCaretDrag() {
+  if (!draggingCaret) return;
+  draggingCaret = false;
+  document.body.classList.remove("dragging-caret");
+  setTimeout(() => { suppressClick = false; }, 0);
+}
+
+document.addEventListener("pointerup", endCaretDrag);
+document.addEventListener("pointercancel", endCaretDrag);
+
+text.addEventListener("click", () => {
+  if (suppressClick) return;
+  keepEditCaretInUntyped();
+});
+
+text.addEventListener("keydown", (event) => {
+  if (["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Home", "End"].includes(event.key)) {
+    caretBeforeKey = text.selectionStart;
+  }
+});
+
+text.addEventListener("keyup", (event) => {
+  if (caretBeforeKey === null) return;
+  const before = caretBeforeKey;
+  caretBeforeKey = null;
+  if (!state || state.running || text.value !== lastValue) return;
+  if (text.selectionStart !== text.selectionEnd) return;
+  const pausedRun = state.phase === "paused" && (state.pause_reason === "user" || state.pause_reason === "focus");
+  const caret = text.selectionStart;
+  if (pausedRun && before <= savedPrefix.length && caret !== before) {
+    moveProgress(caret);
+    return;
+  }
+  keepEditCaretInUntyped();
+});
 
 document.addEventListener("selectionchange", () => {
   if (ignoreSelection || holdCursor || !state || document.activeElement !== text) return;
@@ -202,21 +342,7 @@ document.addEventListener("selectionchange", () => {
     keepCaretInEditableText();
     return;
   }
-  if (text.selectionStart !== text.selectionEnd || text.value !== lastValue) return;
-  const index = text.selectionStart;
-  if (index === savedPrefix.length && pendingIndex === null) return;
-  savedPrefix = text.value.slice(0, index);
-  pendingIndex = index;
-  renderHighlight(text.value, index);
-  countEl.textContent = index + "/" + text.value.length;
-  clearTimeout(cursorTimer);
-  cursorTimer = setTimeout(() => {
-    if (!state || state.running || text.selectionStart !== text.selectionEnd || text.value !== lastValue) return;
-    post("/api/index", { index: text.selectionStart }).then((next) => {
-      pendingIndex = null;
-      paint(next);
-    }).catch(() => { pendingIndex = null; });
-  }, 40);
+  syncEditCaret();
 });
 
 play.addEventListener("click", async () => {

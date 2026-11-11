@@ -73,6 +73,11 @@ h1 {
   color: var(--caret);
 }
 
+.badge.typing {
+  background: #14532d;
+  color: var(--green);
+}
+
 .ghost {
   display: inline-flex;
   align-items: center;
@@ -126,7 +131,6 @@ textarea {
 .highlight {
   color: var(--text);
   pointer-events: none;
-  z-index: 0;
 }
 
 .highlight::-webkit-scrollbar { width: 12px; height: 12px; }
@@ -139,7 +143,10 @@ textarea {
   width: 0;
   height: 0;
   position: relative;
+  z-index: 3;
   vertical-align: baseline;
+  pointer-events: auto;
+  cursor: ew-resize;
 }
 
 .caret::before {
@@ -151,6 +158,28 @@ textarea {
   height: 1.15em;
   border-radius: 1px;
   background: var(--caret);
+  pointer-events: auto;
+}
+
+.caret::after {
+  content: "";
+  position: absolute;
+  left: -5px;
+  bottom: -0.2em;
+  width: 12px;
+  height: 1.4em;
+  pointer-events: auto;
+}
+
+.caret.pass,
+.caret.pass::before,
+.caret.pass::after {
+  pointer-events: none;
+}
+
+body.dragging-caret,
+body.dragging-caret * {
+  cursor: ew-resize !important;
 }
 
 .pause-mark {
@@ -161,7 +190,8 @@ textarea {
   align-items: center;
   justify-content: center;
   gap: 14px;
-  pointer-events: none;
+  pointer-events: auto;
+  cursor: text;
 }
 
 .pause-mark[hidden] { display: none; }
