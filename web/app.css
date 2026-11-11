@@ -137,6 +137,7 @@ textarea {
 .highlight::-webkit-scrollbar-thumb { background: transparent; }
 
 .typed { color: var(--green); }
+.typo { color: #ff4d4f; }
 
 .caret {
   display: inline-block;

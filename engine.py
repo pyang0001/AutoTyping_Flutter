@@ -128,6 +128,7 @@ class TyperEngine:
         self.phase = "ready"
         self._seconds_left = 0
         self._pause_reason = ""
+        self._typo = ""
         self._speed_changed_at = 0.0
         self._generation = 0
         self._run_hook = None
@@ -155,6 +156,7 @@ class TyperEngine:
                 "running": self.phase in ("waiting", "typing"),
                 "seconds_left": self._seconds_left if self.phase == "waiting" else 0,
                 "pause_reason": self._pause_reason if self.phase == "paused" else "",
+                "typo": self._typo if self.phase == "typing" else "",
                 "settings": dict(self.settings),
                 "can_type": sys.platform == "win32",
             }
@@ -226,6 +228,7 @@ class TyperEngine:
                 self.phase = "paused"
                 self._pause_reason = "user"
                 self._seconds_left = 0
+                self._typo = ""
                 return
             if text is not None and self.phase not in ("waiting", "typing"):
                 if text != self.text:
@@ -247,6 +250,7 @@ class TyperEngine:
             generation = self._generation
             self.phase = "waiting"
             self._pause_reason = ""
+            self._typo = ""
             delay = self.settings["start_delay"]
             self._seconds_left = max(1, int(delay))
             frequency = self.settings["mistake_frequency"]
@@ -264,6 +268,7 @@ class TyperEngine:
             self.index = 0
             self.phase = "ready"
             self._pause_reason = ""
+            self._typo = ""
             self._seconds_left = 0
 
     def set_always_on_top(self, value: bool) -> None:
@@ -294,6 +299,7 @@ class TyperEngine:
             self.phase = "paused"
             self._pause_reason = reason
             self._seconds_left = 0
+            self._typo = ""
             return True
 
     def _run(self, generation: int, delay: int, frequency: int, length: int) -> None:
@@ -335,6 +341,7 @@ class TyperEngine:
                     return
                 if self.index >= len(self.text):
                     self.phase = "done"
+                    self._typo = ""
                     return
                 unit = read_unit(self.text, self.index)
                 speed = self.speed
@@ -366,12 +373,21 @@ class TyperEngine:
                 if should_mistake(self._rng, frequency, unit):
                     mistakes = sample_mistake_length(self._rng, length)
                     for _ in range(mistakes):
-                        _type_unit(wrong_character(self._rng, unit))
+                        wrong = wrong_character(self._rng, unit)
+                        with self._lock:
+                            if not self._alive(generation, "typing"):
+                                return
+                            self._typo += wrong
+                        _type_unit(wrong)
                         if not self._pause(generation, speed, 1):
                             return
                     if not self._pause(generation, speed, 1.35):
                         return
                     for _ in range(mistakes):
+                        with self._lock:
+                            if not self._alive(generation, "typing"):
+                                return
+                            self._typo = self._typo[:-1]
                         _backspace()
                         if not self._pause(generation, speed, 0.45):
                             return
@@ -386,6 +402,7 @@ class TyperEngine:
                 finished = self.index >= len(self.text)
                 if finished:
                     self.phase = "done"
+                    self._typo = ""
                     return
             if not self._pause(generation, speed, 1):
                 return

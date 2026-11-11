@@ -48,11 +48,14 @@ let holdCursor = false;
 let editingPaused = false;
 let pauseView = "";
 
-function renderHighlight(value, greenAt) {
+function renderHighlight(value, greenAt, typo) {
   const green = Math.max(0, Math.min(greenAt, value.length));
+  const red = typo || "";
   const caret = '<span class="caret"></span>';
-  highlight.innerHTML = '<span class="typed">' + escapeHtml(value.slice(0, green)) + "</span>" +
-    caret + escapeHtml(value.slice(green));
+  let html = '<span class="typed">' + escapeHtml(value.slice(0, green)) + "</span>";
+  if (red) html += '<span class="typo">' + escapeHtml(value.slice(green, green + red.length)) + "</span>";
+  html += caret + escapeHtml(value.slice(green + red.length));
+  highlight.innerHTML = html;
   highlight.scrollTop = text.scrollTop;
   highlight.scrollLeft = text.scrollLeft;
   syncEditCaret();
@@ -74,7 +77,7 @@ function rememberText(value, index) {
 
 function keepCaretInEditableText() {
   if (!state || !state.running) return;
-  const index = state.index;
+  const index = state.index + ((state.typo || "").length);
   if (text.selectionStart === index && text.selectionEnd === index) return;
   ignoreSelection = true;
   text.setSelectionRange(index, index);
@@ -108,11 +111,16 @@ function paint(next) {
   play.setAttribute("aria-label", running ? "Pause" : "Start");
   text.readOnly = running;
   const editingText = document.activeElement === text || editTarget === text;
-  if (!editingText && text.value !== next.text) text.value = next.text;
-  if (!text.value.startsWith(next.text.slice(0, next.index))) text.value = next.text;
-  const index = pendingIndex !== null && text.value === next.text ? pendingIndex : next.index;
+  const typo = running ? (next.typo || "") : "";
+  const at = Math.max(0, Math.min(next.index || 0, next.text.length));
+  const display = next.text.slice(0, at) + typo + next.text.slice(at);
+  if (running || !editingText) {
+    if (text.value !== display) text.value = display;
+  }
+  if (!running && !text.value.startsWith(next.text.slice(0, at))) text.value = next.text;
+  const index = !typo && pendingIndex !== null && text.value === next.text ? pendingIndex : at;
   rememberText(text.value, index);
-  renderHighlight(text.value, index);
+  renderHighlight(text.value, index, typo);
   keepCaretInEditableText();
   if (!dragging) paintSpeed(next.speed);
   const s = next.settings;
@@ -714,4 +722,4 @@ document.addEventListener("pointerdown", (event) => {
 window.addEventListener("blur", closeEditMenu);
 
 refresh().catch(() => {});
-setInterval(() => refresh().catch(() => {}), 300);
+setInterval(() => refresh().catch(() => {}), 100);

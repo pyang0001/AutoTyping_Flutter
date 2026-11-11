@@ -111,6 +111,16 @@ class PlanTests(unittest.TestCase):
         self.assertEqual(focus_action(False, 9, 9, False), "type")
         self.assertEqual(focus_action(False, 4, 9, True), "pause")
 
+    def test_mistyped_letters_are_reported_until_the_run_stops(self):
+        engine = TyperEngine()
+        engine.text = "Hello"
+        engine.index = 1
+        engine.phase = "typing"
+        engine._typo = "x"
+        self.assertEqual(engine.snapshot()["typo"], "x")
+        engine.phase = "paused"
+        self.assertEqual(engine.snapshot()["typo"], "")
+
     def test_newline_pairs_are_one_typing_unit(self):
         self.assertEqual(read_unit("a\r\nb", 1), "\r\n")
         self.assertEqual(read_unit("ab", 0), "a")
