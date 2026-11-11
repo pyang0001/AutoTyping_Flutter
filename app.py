@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ctypes
 import json
 import sys
 import threading
@@ -114,6 +115,56 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
 
+def _keep_target_focused(active: bool) -> None:
+    if sys.platform != "win32" or WINDOW is None:
+        return
+    native = getattr(WINDOW, "native", None)
+    if native is None:
+        return
+
+    def apply() -> None:
+        try:
+            hwnd = int(native.Handle.ToInt64())
+        except Exception:
+            hwnd = int(native.Handle)
+        user32 = ctypes.windll.user32
+        get_long = getattr(user32, "GetWindowLongPtrW", user32.GetWindowLongW)
+        set_long = getattr(user32, "SetWindowLongPtrW", user32.SetWindowLongW)
+        get_long.argtypes = [ctypes.c_void_p, ctypes.c_int]
+        get_long.restype = ctypes.c_ssize_t
+        set_long.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_ssize_t]
+        set_long.restype = ctypes.c_ssize_t
+        style = get_long(hwnd, -20)
+        noactivate = 0x08000000
+        appwindow = 0x00040000
+        if active:
+            style = style | noactivate | appwindow
+        else:
+            style = style & ~noactivate
+        set_long(hwnd, -20, style)
+        user32.SetWindowPos.argtypes = [
+            ctypes.c_void_p,
+            ctypes.c_void_p,
+            ctypes.c_int,
+            ctypes.c_int,
+            ctypes.c_int,
+            ctypes.c_int,
+            ctypes.c_uint,
+        ]
+        user32.SetWindowPos.restype = ctypes.c_int
+        user32.SetWindowPos(hwnd, None, 0, 0, 0, 0, 0x0001 | 0x0002 | 0x0004 | 0x0010 | 0x0020)
+
+    try:
+        if bool(getattr(native, "InvokeRequired", False)):
+            from System import Action
+
+            native.BeginInvoke(Action(apply))
+            return
+    except Exception:
+        pass
+    apply()
+
+
 def main() -> None:
     port = 8765
     server = None
@@ -132,6 +183,7 @@ def main() -> None:
     print(f"  Window:  {local}", flush=True)
     threading.Thread(target=server.serve_forever, name="autotyper-http", daemon=True).start()
     global WINDOW
+    ENGINE.set_run_hook(_keep_target_focused)
     WINDOW = webview.create_window(
         "Auto Typer",
         local,

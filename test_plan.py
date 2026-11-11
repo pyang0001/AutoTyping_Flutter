@@ -1,7 +1,7 @@
 import random
 import unittest
 
-from engine import TyperEngine, settings_problems
+from engine import TyperEngine, focus_action, settings_problems
 from plan import (
     is_newline,
     read_unit,
@@ -98,6 +98,18 @@ class PlanTests(unittest.TestCase):
         engine.set_index(99)
         self.assertEqual(engine.index, 5)
         self.assertEqual(engine.phase, "done")
+
+    def test_changing_speed_does_not_stop_the_run(self):
+        engine = TyperEngine()
+        engine.phase = "typing"
+        engine.set_speed(18)
+        self.assertEqual(engine.phase, "typing")
+        self.assertEqual(engine.speed, 18)
+        self.assertTrue(engine._speed_is_live())
+        self.assertEqual(focus_action(True, 5, 9, True), "restore")
+        self.assertEqual(focus_action(True, 5, 9, False), "pause")
+        self.assertEqual(focus_action(False, 9, 9, False), "type")
+        self.assertEqual(focus_action(False, 4, 9, True), "pause")
 
     def test_newline_pairs_are_one_typing_unit(self):
         self.assertEqual(read_unit("a\r\nb", 1), "\r\n")

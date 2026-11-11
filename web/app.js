@@ -362,12 +362,35 @@ onTop.addEventListener("change", async () => {
   paint(await post("/api/ontop", { always_on_top: onTop.checked }));
 });
 
-speed.addEventListener("pointerdown", () => { dragging = true; });
-speed.addEventListener("input", () => paintSpeed(speed.value));
-speed.addEventListener("change", async () => {
-  dragging = false;
-  paint(await post("/api/speed", { speed: Number(speed.value) }));
+let speedTimer = null;
+
+function sendSpeed() {
+  const n = Math.max(1, Math.min(30, Math.round(Number(speed.value) || 1)));
+  post("/api/speed", { speed: n }).then((next) => {
+    if (dragging) {
+      if (state) state.speed = next.speed;
+      return;
+    }
+    paint(next);
+  }).catch(() => {});
+}
+
+speed.addEventListener("pointerdown", () => {
+  dragging = true;
+  sendSpeed();
 });
+speed.addEventListener("input", () => {
+  paintSpeed(speed.value);
+  clearTimeout(speedTimer);
+  speedTimer = setTimeout(sendSpeed, 30);
+});
+speed.addEventListener("change", () => {
+  dragging = false;
+  clearTimeout(speedTimer);
+  sendSpeed();
+});
+speed.addEventListener("pointerup", () => { dragging = false; });
+speed.addEventListener("pointercancel", () => { dragging = false; });
 
 let alertTimer = null;
 

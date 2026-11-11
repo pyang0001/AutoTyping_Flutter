@@ -128,7 +128,9 @@ class TyperEngine:
         self.phase = "ready"
         self._seconds_left = 0
         self._pause_reason = ""
+        self._speed_changed_at = 0.0
         self._generation = 0
+        self._run_hook = None
         self._rng = random.Random()
         self._lock = threading.Lock()
         self._hotkeys_suspended = False
@@ -195,9 +197,27 @@ class TyperEngine:
         if self.phase in ("ready", "done"):
             self.phase = "paused"
 
+    def set_run_hook(self, hook) -> None:
+        self._run_hook = hook
+
     def set_speed(self, value: int) -> None:
         with self._lock:
             self.speed = max(1, min(30, int(value)))
+            self._speed_changed_at = time.monotonic()
+
+    def _speed_is_live(self) -> bool:
+        with self._lock:
+            changed = self._speed_changed_at
+        return changed > 0 and time.monotonic() - changed < 1.5
+
+    def _note_run(self, active: bool) -> None:
+        hook = self._run_hook
+        if hook is None:
+            return
+        try:
+            hook(active)
+        except Exception:
+            return
 
     def toggle(self, text: str | None = None, speed: int | None = None) -> None:
         with self._lock:
@@ -277,6 +297,13 @@ class TyperEngine:
             return True
 
     def _run(self, generation: int, delay: int, frequency: int, length: int) -> None:
+        self._note_run(True)
+        try:
+            self._run_body(generation, delay, frequency, length)
+        finally:
+            self._note_run(False)
+
+    def _run_body(self, generation: int, delay: int, frequency: int, length: int) -> None:
         deadline = time.monotonic() + max(0, delay)
         while time.monotonic() < deadline:
             remaining = deadline - time.monotonic()
@@ -314,7 +341,23 @@ class TyperEngine:
             if not unit:
                 break
             current = _foreground_hwnd()
-            if _this_process_is_foreground() or (target and current and current != target):
+            ours = _this_process_is_foreground()
+            action = focus_action(ours, current, target, self._speed_is_live())
+            if action == "pause" and ours:
+                time.sleep(0.15)
+                action = focus_action(
+                    _this_process_is_foreground(),
+                    _foreground_hwnd(),
+                    target,
+                    self._speed_is_live(),
+                )
+            if action == "restore":
+                _focus_hwnd(target)
+                time.sleep(0.02)
+                if _this_process_is_foreground() or _foreground_hwnd() != target:
+                    time.sleep(0.04)
+                    continue
+            elif action == "pause":
                 self._mark_paused(generation, "focus")
                 return
             if not self._wait_modifiers(generation):
@@ -348,16 +391,20 @@ class TyperEngine:
                 return
 
     def _pause(self, generation: int, speed: int, factor: float) -> bool:
-        base = (1000 / max(1, min(30, speed))) * factor
-        ms = int(base * (0.82 + self._rng.random() * 0.36))
-        ms = max(8, min(5000, ms))
-        steps = max(1, ms // 30)
-        slice_s = (ms / steps) / 1000
-        for _ in range(steps):
+        jitter = 0.82 + self._rng.random() * 0.36
+        spent = 0.0
+        while True:
+            with self._lock:
+                if not self._alive(generation, "typing"):
+                    return False
+                current = self.speed or speed
+            total = (1 / max(1, min(30, int(current)))) * factor * jitter
+            total = max(0.008, min(5.0, total))
+            if spent >= total - 0.001:
+                return True
+            slice_s = min(0.03, total - spent)
             time.sleep(slice_s)
-            if not self._alive(generation, "typing"):
-                return False
-        return True
+            spent += slice_s
 
     def _wait_modifiers(self, generation: int) -> bool:
         spins = 0
@@ -516,6 +563,25 @@ def _win32():
     kernel32.GetCurrentProcessId.restype = wintypes.DWORD
     _win32.ready = True
     return user32, kernel32
+
+
+def focus_action(ours: bool, current: int, target: int, speed_live: bool) -> str:
+    if ours:
+        return "restore" if speed_live and target else "pause"
+    if target and current and current != target:
+        return "pause"
+    return "type"
+
+
+def _focus_hwnd(hwnd: int) -> None:
+    if sys.platform != "win32" or not hwnd:
+        return
+    import ctypes
+
+    user32, _kernel32 = _win32()
+    user32.SetForegroundWindow.argtypes = [ctypes.c_void_p]
+    user32.SetForegroundWindow.restype = ctypes.c_int
+    user32.SetForegroundWindow(hwnd)
 
 
 def _foreground_hwnd() -> int:
