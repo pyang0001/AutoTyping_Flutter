@@ -137,7 +137,7 @@ def main() -> None:
         local,
         width=1040,
         height=660,
-        min_size=(900, 600),
+        min_size=(640, 420),
         background_color="#1C1F2B",
         text_select=True,
         on_top=bool(ENGINE.settings.get("always_on_top")),

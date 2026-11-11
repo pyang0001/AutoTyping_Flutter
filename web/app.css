@@ -95,7 +95,7 @@ h1 {
 .editor {
   position: relative;
   flex: 1;
-  min-height: 240px;
+  min-height: 140px;
   background: var(--editor);
   border: 1px solid var(--editor-border);
   border-radius: 12px;
