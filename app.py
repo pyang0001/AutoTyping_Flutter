@@ -7,15 +7,13 @@ import json
 import sys
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from pathlib import Path
 from urllib.parse import urlparse
 
 import webview
 
-from engine import TyperEngine
+from engine import VERSION, TyperEngine, bundle_dir
 
-ROOT = Path(__file__).resolve().parent
-WEB = ROOT / "web"
+WEB = bundle_dir() / "web"
 ENGINE = TyperEngine()
 WINDOW = None
 
@@ -166,6 +164,7 @@ def _keep_target_focused(active: bool) -> None:
 
 
 def main() -> None:
+    web = "--web" in sys.argv[1:]
     port = 8765
     server = None
     for candidate in range(port, port + 20):
@@ -179,22 +178,40 @@ def main() -> None:
         print("Could not open a port for Auto Typer.")
         sys.exit(1)
     local = f"http://127.0.0.1:{port}"
-    print("Auto Typer", flush=True)
-    print(f"  Window:  {local}", flush=True)
+    print(f"Auto Typer {VERSION}", flush=True)
+    print(f"  {'Web' if web else 'Window'}:  {local}", flush=True)
     threading.Thread(target=server.serve_forever, name="autotyper-http", daemon=True).start()
-    global WINDOW
-    ENGINE.set_run_hook(_keep_target_focused)
-    WINDOW = webview.create_window(
-        "Auto Typer",
-        local,
-        width=1040,
-        height=660,
-        min_size=(640, 420),
-        background_color="#1C1F2B",
-        text_select=True,
-        on_top=bool(ENGINE.settings.get("always_on_top")),
-    )
     try:
+        if web:
+            import webbrowser
+
+            webbrowser.open(local)
+            if getattr(sys, "frozen", False):
+                ctypes.windll.user32.MessageBoxW(
+                    None,
+                    "Auto Typer is open in your browser.\nClose this message to quit.",
+                    f"Auto Typer {VERSION}",
+                    0,
+                )
+            else:
+                try:
+                    while True:
+                        threading.Event().wait(0.5)
+                except KeyboardInterrupt:
+                    pass
+            return
+        global WINDOW
+        ENGINE.set_run_hook(_keep_target_focused)
+        WINDOW = webview.create_window(
+            f"Auto Typer {VERSION}",
+            local,
+            width=1040,
+            height=660,
+            min_size=(640, 420),
+            background_color="#1C1F2B",
+            text_select=True,
+            on_top=bool(ENGINE.settings.get("always_on_top")),
+        )
         webview.start()
     finally:
         server.shutdown()

@@ -18,8 +18,22 @@ from plan import (
     wrong_character,
 )
 
-ROOT = Path(__file__).resolve().parent
-SETTINGS_PATH = ROOT / "settings.json"
+VERSION = "1.0.0"
+
+
+def install_dir() -> Path:
+    if getattr(sys, "frozen", False):
+        return Path(sys.executable).resolve().parent
+    return Path(__file__).resolve().parent
+
+
+def bundle_dir() -> Path:
+    if getattr(sys, "frozen", False):
+        return Path(getattr(sys, "_MEIPASS", install_dir()))
+    return Path(__file__).resolve().parent
+
+
+SETTINGS_PATH = install_dir() / "settings.json"
 
 DEFAULTS = {
     "start_delay": 1,
@@ -159,6 +173,7 @@ class TyperEngine:
                 "typo": self._typo if self.phase == "typing" else "",
                 "settings": dict(self.settings),
                 "can_type": sys.platform == "win32",
+                "version": VERSION,
             }
 
     def set_text(self, value: str, _index: int | None = None) -> None:

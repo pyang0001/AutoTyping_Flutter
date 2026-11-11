@@ -59,6 +59,11 @@ h1 {
   letter-spacing: -0.03em;
 }
 
+.version {
+  color: var(--muted);
+  font-size: 13px;
+}
+
 .badge {
   background: var(--badge);
   color: var(--secondary);

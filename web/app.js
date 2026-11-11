@@ -87,6 +87,8 @@ function keepCaretInEditableText() {
 function paint(next) {
   state = next;
   phaseEl.textContent = label(next.phase);
+  const versionEl = document.querySelector("#version");
+  if (versionEl && next.version) versionEl.textContent = next.version;
   phaseEl.classList.toggle("paused", next.phase === "paused");
   phaseEl.classList.toggle("starting", next.phase === "waiting");
   phaseEl.classList.toggle("typing", next.phase === "typing");

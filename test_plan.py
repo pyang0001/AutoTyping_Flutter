@@ -1,7 +1,7 @@
 import random
 import unittest
 
-from engine import TyperEngine, focus_action, settings_problems
+from engine import VERSION, TyperEngine, focus_action, settings_problems
 from plan import (
     is_newline,
     read_unit,
@@ -110,6 +110,10 @@ class PlanTests(unittest.TestCase):
         self.assertEqual(focus_action(True, 5, 9, False), "pause")
         self.assertEqual(focus_action(False, 9, 9, False), "type")
         self.assertEqual(focus_action(False, 4, 9, True), "pause")
+
+    def test_first_release_reports_its_version(self):
+        self.assertEqual(VERSION, "1.0.0")
+        self.assertEqual(TyperEngine().snapshot()["version"], "1.0.0")
 
     def test_mistyped_letters_are_reported_until_the_run_stops(self):
         engine = TyperEngine()
