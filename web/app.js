@@ -42,10 +42,29 @@ function escapeHtml(value) {
 
 let savedPrefix = "";
 let lastValue = "";
+let pendingIndex = null;
+let ignoreSelection = false;
+let holdCursor = false;
 
-function renderHighlight(value, index) {
-  const at = Math.max(0, Math.min(index, value.length));
-  highlight.innerHTML = '<span class="typed">' + escapeHtml(value.slice(0, at)) + "</span>" + escapeHtml(value.slice(at));
+function renderHighlight(value, greenAt) {
+  const green = Math.max(0, Math.min(greenAt, value.length));
+  const selecting = document.activeElement === text && text.selectionStart !== text.selectionEnd;
+  let caretAt = green;
+  if (!selecting && !(state && state.running) && document.activeElement === text) {
+    caretAt = Math.max(0, Math.min(text.selectionStart, value.length));
+  }
+  const caret = '<span class="caret"></span>';
+  let html;
+  if (selecting) {
+    html = '<span class="typed">' + escapeHtml(value.slice(0, green)) + "</span>" + escapeHtml(value.slice(green));
+  } else if (caretAt <= green) {
+    html = '<span class="typed">' + escapeHtml(value.slice(0, caretAt)) + "</span>" + caret +
+      '<span class="typed">' + escapeHtml(value.slice(caretAt, green)) + "</span>" + escapeHtml(value.slice(green));
+  } else {
+    html = '<span class="typed">' + escapeHtml(value.slice(0, green)) + "</span>" +
+      escapeHtml(value.slice(green, caretAt)) + caret + escapeHtml(value.slice(caretAt));
+  }
+  highlight.innerHTML = html;
   highlight.scrollTop = text.scrollTop;
   highlight.scrollLeft = text.scrollLeft;
 }
@@ -57,15 +76,12 @@ function rememberText(value, index) {
 }
 
 function keepCaretInEditableText() {
-  if (!state) return;
-  const index = state.running ? state.index : savedPrefix.length;
-  const start = text.selectionStart ?? 0;
-  const end = text.selectionEnd ?? start;
-  if (state.running) {
-    if (start !== index || end !== index) text.setSelectionRange(index, index);
-    return;
-  }
-  if (start === end && start < index) text.setSelectionRange(index, index);
+  if (!state || !state.running) return;
+  const index = state.index;
+  if (text.selectionStart === index && text.selectionEnd === index) return;
+  ignoreSelection = true;
+  text.setSelectionRange(index, index);
+  ignoreSelection = false;
 }
 
 function paint(next) {
@@ -82,8 +98,9 @@ function paint(next) {
   const editingText = document.activeElement === text || editTarget === text;
   if (!editingText && text.value !== next.text) text.value = next.text;
   if (!text.value.startsWith(next.text.slice(0, next.index))) text.value = next.text;
-  rememberText(text.value, next.index);
-  renderHighlight(text.value, next.index);
+  const index = pendingIndex !== null && text.value === next.text ? pendingIndex : next.index;
+  rememberText(text.value, index);
+  renderHighlight(text.value, index);
   keepCaretInEditableText();
   if (!dragging) paintSpeed(next.speed);
   const s = next.settings;
@@ -127,16 +144,18 @@ text.addEventListener("beforeinput", (event) => {
 });
 
 text.addEventListener("input", () => {
+  holdCursor = true;
   if (!state || state.running || !text.value.startsWith(savedPrefix)) {
     text.value = lastValue;
-    keepCaretInEditableText();
     renderHighlight(text.value, savedPrefix.length);
+    holdCursor = false;
     return;
   }
   lastValue = text.value;
   renderHighlight(text.value, savedPrefix.length);
   countEl.textContent = savedPrefix.length + "/" + text.value.length;
   post("/api/text", { text: text.value, index: savedPrefix.length }).then(paint).catch(() => {});
+  setTimeout(() => { holdCursor = false; }, 0);
 });
 
 text.addEventListener("scroll", () => {
@@ -144,9 +163,29 @@ text.addEventListener("scroll", () => {
   highlight.scrollLeft = text.scrollLeft;
 });
 
+let cursorTimer = null;
+
 document.addEventListener("selectionchange", () => {
-  if (document.activeElement !== text) return;
-  keepCaretInEditableText();
+  if (ignoreSelection || holdCursor || !state || document.activeElement !== text) return;
+  if (state.running) {
+    keepCaretInEditableText();
+    return;
+  }
+  if (text.selectionStart !== text.selectionEnd || text.value !== lastValue) return;
+  const index = text.selectionStart;
+  if (index === savedPrefix.length && pendingIndex === null) return;
+  savedPrefix = text.value.slice(0, index);
+  pendingIndex = index;
+  renderHighlight(text.value, index);
+  countEl.textContent = index + "/" + text.value.length;
+  clearTimeout(cursorTimer);
+  cursorTimer = setTimeout(() => {
+    if (!state || state.running || text.selectionStart !== text.selectionEnd || text.value !== lastValue) return;
+    post("/api/index", { index: text.selectionStart }).then((next) => {
+      pendingIndex = null;
+      paint(next);
+    }).catch(() => { pendingIndex = null; });
+  }, 40);
 });
 
 play.addEventListener("click", async () => {

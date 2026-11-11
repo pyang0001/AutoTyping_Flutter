@@ -128,14 +128,36 @@ textarea {
 
 .typed { color: var(--green); }
 
+.caret {
+  display: inline-block;
+  width: 0;
+  height: 0;
+  position: relative;
+  vertical-align: baseline;
+}
+
+.caret::before {
+  content: "";
+  position: absolute;
+  left: -1px;
+  bottom: -0.2em;
+  width: 1px;
+  height: 1.2em;
+  background: #f4f6fb;
+  animation: caret-blink 1.05s steps(1) infinite;
+}
+
+@keyframes caret-blink {
+  50% { opacity: 0; }
+}
+
 textarea {
   z-index: 1;
   resize: none;
   outline: none;
   background: transparent;
   color: transparent;
-  -webkit-text-fill-color: transparent;
-  caret-color: #f4f6fb;
+  caret-color: transparent;
   cursor: text;
   user-select: text;
   -webkit-user-select: text;
