@@ -1,0 +1,13 @@
+---
+description: Commit and push project changes without asking
+alwaysApply: true
+---
+
+# Auto commit and push
+
+After any change in this project, commit and push without asking.
+
+- Use author Apollo and email pyang1016@outlook.com through the commit environment variables. Do not change git config.
+- Commit on `main` and push to `origin` `main`.
+- Leave out secrets and local settings such as `settings.json`.
+- If there is nothing to commit, do not create an empty commit.
