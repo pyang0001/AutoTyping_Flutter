@@ -87,6 +87,8 @@ function keepCaretInEditableText() {
 function paint(next) {
   state = next;
   phaseEl.textContent = label(next.phase);
+  phaseEl.classList.toggle("paused", next.phase === "paused");
+  document.querySelector("#pause-mark").hidden = next.phase !== "paused";
   countEl.textContent = next.index + "/" + next.total;
   const width = next.fraction > 0 ? Math.max(8, next.fraction * 100) : 8;
   bar.style.width = (next.fraction > 0 ? width : 8) + (next.fraction > 0 ? "%" : "px");
@@ -104,7 +106,9 @@ function paint(next) {
   keepCaretInEditableText();
   if (!dragging) paintSpeed(next.speed);
   const s = next.settings;
-  shortcuts.textContent = s.start_hotkey + " Start / Pause    " + s.reset_hotkey + " Reset";
+  shortcuts.textContent = next.phase === "paused"
+    ? "Paused - press " + s.start_hotkey + " to resume"
+    : s.start_hotkey + " Start / Pause    " + s.reset_hotkey + " Reset";
   if (document.activeElement !== onTop) onTop.checked = !!s.always_on_top;
 }
 

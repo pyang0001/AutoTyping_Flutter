@@ -67,6 +67,11 @@ h1 {
   font-size: 13px;
 }
 
+.badge.paused {
+  background: #5a3d12;
+  color: var(--caret);
+}
+
 .ghost {
   display: inline-flex;
   align-items: center;
@@ -140,15 +145,31 @@ textarea {
   content: "";
   position: absolute;
   left: -1px;
-  bottom: -0.2em;
-  width: 1px;
-  height: 1.2em;
-  background: #f4f6fb;
-  animation: caret-blink 1.05s steps(1) infinite;
+  bottom: -0.12em;
+  width: 3px;
+  height: 1.15em;
+  border-radius: 1px;
+  background: var(--caret);
 }
 
-@keyframes caret-blink {
-  50% { opacity: 0; }
+.pause-mark {
+  position: absolute;
+  inset: 0 0 16px;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  pointer-events: none;
+}
+
+.pause-mark[hidden] { display: none; }
+
+.pause-mark span {
+  width: 16px;
+  height: 68px;
+  border-radius: 6px;
+  background: var(--caret);
 }
 
 textarea {

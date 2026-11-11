@@ -88,7 +88,7 @@ class PlanTests(unittest.TestCase):
         self.assertEqual(engine.phase, "ready")
         engine.set_index(2)
         self.assertEqual(engine.snapshot()["index"], 2)
-        self.assertEqual(engine.phase, "ready")
+        self.assertEqual(engine.phase, "paused")
         engine.phase = "done"
         engine.set_index(2)
         self.assertEqual(engine.phase, "paused")

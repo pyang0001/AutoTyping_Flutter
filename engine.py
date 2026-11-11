@@ -187,7 +187,7 @@ class TyperEngine:
             if self.phase == "paused":
                 self.phase = "done"
             return
-        if self.phase == "done":
+        if self.phase in ("ready", "done"):
             self.phase = "paused"
 
     def set_speed(self, value: int) -> None:
