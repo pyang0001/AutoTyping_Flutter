@@ -1,4 +1,4 @@
-"""Auto Typer as a Windows window. The page is drawn inside that window."""
+"""Auto Typer as a Windows window, or in the browser with --web."""
 
 from __future__ import annotations
 
@@ -8,8 +8,6 @@ import sys
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse
-
-import webview
 
 from engine import VERSION, TyperEngine, bundle_dir
 
@@ -186,7 +184,7 @@ def main() -> None:
             import webbrowser
 
             webbrowser.open(local)
-            if getattr(sys, "frozen", False):
+            if getattr(sys, "frozen", False) and sys.stdout is None:
                 ctypes.windll.user32.MessageBoxW(
                     None,
                     "Auto Typer is open in your browser.\nClose this message to quit.",
@@ -200,6 +198,8 @@ def main() -> None:
                 except KeyboardInterrupt:
                     pass
             return
+        import webview
+
         global WINDOW
         ENGINE.set_run_hook(_keep_target_focused)
         WINDOW = webview.create_window(
