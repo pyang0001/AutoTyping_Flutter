@@ -225,7 +225,44 @@ input[type="range"]::-moz-range-thumb {
   font-size: 13px;
 }
 
-.hint { min-width: 0; }
+.switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--secondary);
+  cursor: pointer;
+  user-select: none;
+}
+
+.switch input {
+  position: absolute;
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+
+.knob {
+  width: 36px;
+  height: 20px;
+  border-radius: 99px;
+  background: #3a4052;
+  position: relative;
+  flex: 0 0 auto;
+}
+
+.knob::after {
+  content: "";
+  position: absolute;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #fff;
+  top: 2px;
+  left: 2px;
+}
+
+.switch input:checked + .knob { background: var(--green); }
+.switch input:checked + .knob::after { left: 18px; }
 
 dialog {
   width: min(640px, calc(100vw - 32px));

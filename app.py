@@ -1,20 +1,22 @@
-"""Auto Typer web UI. Open it on this PC or on a phone on the same Wi-Fi."""
+"""Auto Typer as a Windows window. The page is drawn inside that window."""
 
 from __future__ import annotations
 
 import json
-import socket
 import sys
-import webbrowser
+import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlparse
+
+import webview
 
 from engine import TyperEngine
 
 ROOT = Path(__file__).resolve().parent
 WEB = ROOT / "web"
 ENGINE = TyperEngine()
+WINDOW = None
 
 FILES = {
     "/": ("index.html", "text/html; charset=utf-8"),
@@ -80,6 +82,13 @@ class Handler(BaseHTTPRequestHandler):
             ENGINE.suspend_hotkeys(bool(payload.get("suspended")))
             self._json(200, {"ok": True})
             return
+        if path == "/api/ontop":
+            value = bool(payload.get("always_on_top"))
+            ENGINE.set_always_on_top(value)
+            if WINDOW is not None:
+                WINDOW.on_top = value
+            self._json(200, ENGINE.snapshot())
+            return
         self.send_error(404)
 
     def _read_json(self) -> dict:
@@ -101,17 +110,6 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
 
-def lan_ip() -> str:
-    try:
-        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        sock.connect(("8.8.8.8", 80))
-        ip = sock.getsockname()[0]
-        sock.close()
-        return ip
-    except OSError:
-        return "this-pc"
-
-
 def main() -> None:
     port = 8765
     server = None
@@ -126,17 +124,23 @@ def main() -> None:
         print("Could not open a port for Auto Typer.")
         sys.exit(1)
     local = f"http://127.0.0.1:{port}"
-    phone = f"http://{lan_ip()}:{port}"
     print("Auto Typer", flush=True)
-    print(f"  This PC:  {local}", flush=True)
-    print(f"  Phone:    {phone}", flush=True)
-    if "--no-browser" not in sys.argv:
-        webbrowser.open(local)
+    print(f"  Window:  {local}", flush=True)
+    threading.Thread(target=server.serve_forever, name="autotyper-http", daemon=True).start()
+    global WINDOW
+    WINDOW = webview.create_window(
+        "Auto Typer",
+        local,
+        width=1040,
+        height=660,
+        min_size=(900, 600),
+        background_color="#1C1F2B",
+        on_top=bool(ENGINE.settings.get("always_on_top")),
+    )
     try:
-        server.serve_forever()
-    except KeyboardInterrupt:
-        print()
+        webview.start()
     finally:
+        server.shutdown()
         server.server_close()
 
 

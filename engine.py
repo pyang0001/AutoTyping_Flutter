@@ -138,6 +138,12 @@ class TyperEngine:
             self.index = 0
             self.phase = "ready"
 
+    def set_always_on_top(self, value: bool) -> None:
+        with self._lock:
+            self.settings["always_on_top"] = bool(value)
+            current = dict(self.settings)
+        save_settings(current)
+
     def update_settings(self, raw: dict) -> str | None:
         nxt = clamp_settings(raw)
         if nxt["start_hotkey"].lower() == nxt["reset_hotkey"].lower():

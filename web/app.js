@@ -9,7 +9,7 @@ const reset = document.querySelector("#reset");
 const speed = document.querySelector("#speed");
 const speedBox = document.querySelector("#speed-box");
 const shortcuts = document.querySelector("#shortcuts");
-const where = document.querySelector("#where");
+const onTop = document.querySelector("#on-top");
 const dialog = document.querySelector("#settings");
 const form = document.querySelector("#settings-form");
 const errorEl = document.querySelector("#settings-error");
@@ -52,9 +52,7 @@ function paint(next) {
   if (!dragging) paintSpeed(next.speed);
   const s = next.settings;
   shortcuts.textContent = s.start_hotkey + " Start / Pause    " + s.reset_hotkey + " Reset";
-  where.textContent = next.can_type
-    ? "Click play, then click the window that should receive the text."
-    : "This browser can edit the text. Typing into other apps runs on the Windows PC.";
+  if (document.activeElement !== onTop) onTop.checked = !!s.always_on_top;
 }
 
 function label(phase) {
@@ -95,6 +93,10 @@ play.addEventListener("click", async () => {
 
 reset.addEventListener("click", async () => {
   paint(await post("/api/reset"));
+});
+
+onTop.addEventListener("change", async () => {
+  paint(await post("/api/ontop", { always_on_top: onTop.checked }));
 });
 
 speed.addEventListener("pointerdown", () => { dragging = true; });
@@ -139,7 +141,7 @@ form.addEventListener("submit", async (event) => {
       mistake_length: fields.mistake_length.value,
       start_hotkey: fields.start_hotkey.value,
       reset_hotkey: fields.reset_hotkey.value,
-      always_on_top: state.settings.always_on_top,
+      always_on_top: onTop.checked,
     });
     paint(saved);
     await closeSettings();
