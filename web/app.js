@@ -45,17 +45,20 @@ let lastValue = "";
 let pendingIndex = null;
 let ignoreSelection = false;
 let holdCursor = false;
+let editingPaused = false;
+let pauseView = "";
 
 function renderHighlight(value, greenAt) {
   const green = Math.max(0, Math.min(greenAt, value.length));
   const selecting = document.activeElement === text && text.selectionStart !== text.selectionEnd;
+  const covered = state && state.phase === "paused" && state.pause_reason === "user" && !editingPaused;
   let caretAt = green;
   if (!selecting && !(state && state.running) && document.activeElement === text) {
     caretAt = Math.max(0, Math.min(text.selectionStart, value.length));
   }
   const caret = '<span class="caret"></span>';
   let html;
-  if (selecting) {
+  if (selecting || covered) {
     html = '<span class="typed">' + escapeHtml(value.slice(0, green)) + "</span>" + escapeHtml(value.slice(green));
   } else if (caretAt <= green) {
     html = '<span class="typed">' + escapeHtml(value.slice(0, caretAt)) + "</span>" + caret +
@@ -91,8 +94,11 @@ function paint(next) {
   phaseEl.classList.toggle("starting", next.phase === "waiting");
   const userPaused = next.phase === "paused" && next.pause_reason === "user";
   const focusPaused = next.phase === "paused" && next.pause_reason === "focus";
-  document.querySelector("#pause-mark").hidden = !userPaused;
-  document.querySelector("#focus-pause").hidden = !focusPaused;
+  const view = userPaused ? "user" : "";
+  if (view !== pauseView) editingPaused = false;
+  pauseView = view;
+  document.querySelector("#pause-mark").hidden = !(userPaused && !editingPaused);
+  document.querySelector("#focus-pause").hidden = !(focusPaused || (userPaused && editingPaused));
   const countdown = document.querySelector("#count-overlay");
   countdown.hidden = next.phase !== "waiting";
   countdown.textContent = String(next.seconds_left || 1);
@@ -175,6 +181,12 @@ text.addEventListener("input", () => {
   countEl.textContent = savedPrefix.length + "/" + text.value.length;
   post("/api/text", { text: text.value, index: savedPrefix.length }).then(paint).catch(() => {});
   setTimeout(() => { holdCursor = false; }, 0);
+});
+
+text.addEventListener("pointerdown", () => {
+  if (!state || state.phase !== "paused" || state.pause_reason !== "user" || editingPaused) return;
+  editingPaused = true;
+  paint(state);
 });
 
 text.addEventListener("scroll", () => {
