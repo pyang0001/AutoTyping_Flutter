@@ -1,28 +1,16 @@
 # -*- mode: python ; coding: utf-8 -*-
 """Windows build for Auto Typer 1.0.0. One file opens the app window."""
 
-from PyInstaller.utils.hooks import collect_all
-
-datas = [("web", "web")]
-binaries = []
-hiddenimports = ["clr"]
-
-for package in ("webview", "pythonnet", "clr_loader"):
-    pkg_datas, pkg_binaries, pkg_hidden = collect_all(package)
-    datas += pkg_datas
-    binaries += pkg_binaries
-    hiddenimports += pkg_hidden
-
 a = Analysis(
-    ["app.py"],
+    ["windows_app.py"],
     pathex=[],
-    binaries=binaries,
-    datas=datas,
-    hiddenimports=hiddenimports,
+    binaries=[],
+    datas=[("web", "web")],
+    hiddenimports=["desktop"],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
-    excludes=[],
+    excludes=["webview", "pythonnet", "clr_loader", "cffi", "clr"],
     noarchive=False,
     optimize=0,
 )

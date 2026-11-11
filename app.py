@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import ctypes
 import json
+import os
 import sys
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -88,6 +89,10 @@ class Handler(BaseHTTPRequestHandler):
             ENGINE.set_always_on_top(value)
             if WINDOW is not None:
                 WINDOW.on_top = value
+            else:
+                import desktop
+
+                desktop.set_topmost(value)
             self._json(200, ENGINE.snapshot())
             return
         self.send_error(404)
@@ -112,10 +117,13 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def _keep_target_focused(active: bool) -> None:
-    if sys.platform != "win32" or WINDOW is None:
+    if sys.platform != "win32":
         return
-    native = getattr(WINDOW, "native", None)
+    native = getattr(WINDOW, "native", None) if WINDOW is not None else None
     if native is None:
+        import desktop
+
+        desktop.set_run_style(active)
         return
 
     def apply() -> None:
@@ -161,6 +169,30 @@ def _keep_target_focused(active: bool) -> None:
     apply()
 
 
+def _run_webview(local: str) -> bool:
+    try:
+        module = __import__("web" + "view")
+    except Exception:
+        return False
+    global WINDOW
+    try:
+        WINDOW = module.create_window(
+            f"Auto Typer {VERSION}",
+            local,
+            width=1040,
+            height=660,
+            min_size=(640, 420),
+            background_color="#1C1F2B",
+            text_select=True,
+            on_top=bool(ENGINE.settings.get("always_on_top")),
+        )
+        module.start()
+    except Exception:
+        WINDOW = None
+        return False
+    return True
+
+
 def main() -> None:
     web = "--web" in sys.argv[1:]
     port = 8765
@@ -198,21 +230,17 @@ def main() -> None:
                 except KeyboardInterrupt:
                     pass
             return
-        import webview
-
-        global WINDOW
         ENGINE.set_run_hook(_keep_target_focused)
-        WINDOW = webview.create_window(
-            f"Auto Typer {VERSION}",
-            local,
-            width=1040,
-            height=660,
-            min_size=(640, 420),
-            background_color="#1C1F2B",
-            text_select=True,
-            on_top=bool(ENGINE.settings.get("always_on_top")),
-        )
-        webview.start()
+        if os.environ.get("AUTOTYPER_EDGE") == "1" or not _run_webview(local):
+            import desktop
+
+            if not desktop.run_edge_window(local, bool(ENGINE.settings.get("always_on_top"))):
+                ctypes.windll.user32.MessageBoxW(
+                    None,
+                    "Install Microsoft Edge to open the Auto Typer window.",
+                    f"Auto Typer {VERSION}",
+                    0,
+                )
     finally:
         server.shutdown()
         server.server_close()

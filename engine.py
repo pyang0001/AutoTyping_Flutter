@@ -492,8 +492,6 @@ class TyperEngine:
                 self.on_hotkey(int(msg.wParam))
             elif msg.message == 0x8000:
                 self._rebind_hotkeys()
-            user32.TranslateMessage(ctypes.byref(msg))
-            user32.DispatchMessageW(ctypes.byref(msg))
 
 
 def ctypes_post(thread_id: int) -> None:
