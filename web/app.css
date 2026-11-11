@@ -345,6 +345,7 @@ h2 { margin: 0; font-size: 22px; font-weight: 650; }
   color: #fda4af;
   margin: 4px 22px 0;
   font-size: 13px;
+  white-space: pre-line;
 }
 
 .dialog-actions { padding: 16px 22px 20px; justify-content: flex-end; gap: 10px; }

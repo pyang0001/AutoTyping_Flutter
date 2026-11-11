@@ -31,17 +31,66 @@ DEFAULTS = {
 }
 
 
-def clamp_settings(raw: dict) -> dict:
-    data = dict(DEFAULTS)
-    data.update({key: raw[key] for key in DEFAULTS if key in raw})
-    data["start_delay"] = max(0, min(120, int(data["start_delay"])))
-    data["default_speed"] = max(1, min(10, int(data["default_speed"])))
-    data["mistake_frequency"] = max(0, min(100, int(data["mistake_frequency"])))
-    data["mistake_length"] = max(1, min(20, int(data["mistake_length"])))
-    data["start_hotkey"] = str(data["start_hotkey"] or "Ctrl+Up")
-    data["reset_hotkey"] = str(data["reset_hotkey"] or "Ctrl+Down")
-    data["always_on_top"] = bool(data["always_on_top"])
-    return data
+def whole_number(value: object) -> int | None:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value
+    text = str(value).strip()
+    if text.startswith("-"):
+        digits = text[1:]
+        sign = -1
+    else:
+        digits = text
+        sign = 1
+    if not digits.isdigit():
+        return None
+    return sign * int(digits)
+
+
+def is_hotkey_chord(label: object) -> bool:
+    parsed = _parse_hotkey(str(label).strip())
+    return parsed is not None and parsed[0] != 0
+
+
+def settings_problems(raw: dict) -> list[str]:
+    problems: list[str] = []
+    if whole_number(raw.get("start_delay")) not in (1, 2, 3):
+        problems.append("Start delay must be 1, 2, or 3.")
+    speed = whole_number(raw.get("default_speed"))
+    if speed is None or not 1 <= speed <= 30:
+        problems.append("Default speed must be a number from 1 to 30.")
+    frequency = whole_number(raw.get("mistake_frequency"))
+    if frequency is None or not 0 <= frequency <= 10:
+        problems.append("Mistake frequency must be a number from 0 to 10.")
+    length = whole_number(raw.get("mistake_length"))
+    if length is None or not 0 <= length <= 5:
+        problems.append("Mistake length must be a number from 0 to 5.")
+    start = str(raw.get("start_hotkey", "")).strip()
+    reset = str(raw.get("reset_hotkey", "")).strip()
+    if not is_hotkey_chord(start):
+        problems.append(
+            "Start / Pause hotkey must be a shortcut like Ctrl+Up, not a single character like s."
+        )
+    if not is_hotkey_chord(reset):
+        problems.append(
+            "Reset hotkey must be a shortcut like Ctrl+Down, not a single character like s."
+        )
+    if is_hotkey_chord(start) and is_hotkey_chord(reset) and start.lower() == reset.lower():
+        problems.append("Start and reset need different shortcuts.")
+    return problems
+
+
+def accepted_settings(raw: dict) -> dict:
+    return {
+        "start_delay": whole_number(raw.get("start_delay")),
+        "default_speed": whole_number(raw.get("default_speed")),
+        "mistake_frequency": whole_number(raw.get("mistake_frequency")),
+        "mistake_length": whole_number(raw.get("mistake_length")),
+        "start_hotkey": str(raw.get("start_hotkey", "")).strip(),
+        "reset_hotkey": str(raw.get("reset_hotkey", "")).strip(),
+        "always_on_top": bool(raw.get("always_on_top")),
+    }
 
 
 def load_settings() -> dict:
@@ -49,7 +98,20 @@ def load_settings() -> dict:
         saved = json.loads(SETTINGS_PATH.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError, TypeError, ValueError):
         saved = {}
-    return clamp_settings(saved if isinstance(saved, dict) else {})
+    if not isinstance(saved, dict):
+        saved = {}
+    data = dict(DEFAULTS)
+    for key in ("start_delay", "default_speed", "mistake_frequency", "mistake_length"):
+        if key in saved and settings_problems({**DEFAULTS, key: saved[key]}) == []:
+            data[key] = whole_number(saved[key])
+    for key in ("start_hotkey", "reset_hotkey"):
+        if key in saved and is_hotkey_chord(saved[key]):
+            data[key] = str(saved[key]).strip()
+    if data["start_hotkey"].lower() == data["reset_hotkey"].lower():
+        data["reset_hotkey"] = DEFAULTS["reset_hotkey"]
+    if "always_on_top" in saved:
+        data["always_on_top"] = bool(saved["always_on_top"])
+    return data
 
 
 def save_settings(settings: dict) -> None:
@@ -100,7 +162,7 @@ class TyperEngine:
 
     def set_speed(self, value: int) -> None:
         with self._lock:
-            self.speed = max(1, min(10, int(value)))
+            self.speed = max(1, min(30, int(value)))
 
     def toggle(self, text: str | None = None, speed: int | None = None) -> None:
         with self._lock:
@@ -114,7 +176,7 @@ class TyperEngine:
                     self.index = 0
                     self.phase = "ready"
             if speed is not None:
-                self.speed = max(1, min(10, int(speed)))
+                self.speed = max(1, min(30, int(speed)))
             if not self.text:
                 return
             if self.phase == "done" or self.index >= len(self.text):
@@ -145,9 +207,10 @@ class TyperEngine:
         save_settings(current)
 
     def update_settings(self, raw: dict) -> str | None:
-        nxt = clamp_settings(raw)
-        if nxt["start_hotkey"].lower() == nxt["reset_hotkey"].lower():
-            return "Start and reset need different shortcuts."
+        problems = settings_problems(raw)
+        if problems:
+            return "\n".join(problems)
+        nxt = accepted_settings(raw)
         with self._lock:
             self.settings = nxt
         save_settings(nxt)
@@ -234,7 +297,7 @@ class TyperEngine:
                 return
 
     def _pause(self, generation: int, speed: int, factor: float) -> bool:
-        base = (1000 / max(1, min(10, speed))) * factor
+        base = (1000 / max(1, min(30, speed))) * factor
         ms = int(base * (0.82 + self._rng.random() * 0.36))
         ms = max(8, min(5000, ms))
         steps = max(1, ms // 30)

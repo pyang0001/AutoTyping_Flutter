@@ -35,7 +35,7 @@
         <svg viewBox="0 0 24 24"><path d="M12 3.5v6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><path d="M7.1 6.2a7 7 0 1 0 9.8 0" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
       </button>
       <span class="speed-label">Speed</span>
-      <input id="speed" type="range" min="1" max="10" value="4" aria-label="Speed">
+      <input id="speed" type="range" min="1" max="30" value="4" aria-label="Speed">
       <span id="speed-box" class="speed-box">4</span>
       <span class="unit">chars/sec</span>
     </section>
@@ -65,27 +65,27 @@
       </header>
       <div class="rows">
         <label class="row">
-          <span><strong>Start delay</strong><small>Seconds to wait before typing begins</small></span>
+          <span><strong>Start delay</strong><small>Only 1, 2, or 3 seconds</small></span>
           <input id="start-delay" inputmode="numeric" value="1">
         </label>
         <label class="row">
-          <span><strong>Default speed</strong><small>Characters per second when the app opens</small></span>
+          <span><strong>Default speed</strong><small>A number from 1 to 30</small></span>
           <input id="default-speed" inputmode="numeric" value="4">
         </label>
         <label class="row">
-          <span><strong>Mistake frequency</strong><small>Mistakes per 100 characters; 0 turns them off</small></span>
+          <span><strong>Mistake frequency</strong><small>A number from 0 to 10. 0 turns mistakes off</small></span>
           <input id="mistake-frequency" inputmode="numeric" value="2">
         </label>
         <label class="row">
-          <span><strong>Mistake length</strong><small>Average wrong characters before correcting</small></span>
+          <span><strong>Mistake length</strong><small>A number from 0 to 5</small></span>
           <input id="mistake-length" inputmode="numeric" value="3">
         </label>
         <label class="row">
-          <span><strong>Start / Pause hotkey</strong><small>Click, then press the keys</small></span>
+          <span><strong>Start / Pause hotkey</strong><small>Click, then press a shortcut like Ctrl+Up</small></span>
           <input id="start-hotkey" class="hotkey" value="Ctrl+Up" readonly>
         </label>
         <label class="row">
-          <span><strong>Reset hotkey</strong><small>Click, then press the keys</small></span>
+          <span><strong>Reset hotkey</strong><small>Click, then press a shortcut like Ctrl+Down</small></span>
           <input id="reset-hotkey" class="hotkey" value="Ctrl+Down" readonly>
         </label>
       </div>

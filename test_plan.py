@@ -1,6 +1,7 @@
 import random
 import unittest
 
+from engine import settings_problems
 from plan import (
     is_newline,
     read_unit,
@@ -24,6 +25,7 @@ class PlanTests(unittest.TestCase):
             self.assertGreaterEqual(length, 2)
             self.assertLessEqual(length, 4)
         self.assertEqual(sample_mistake_length(rng, 1), 1)
+        self.assertEqual(sample_mistake_length(rng, 0), 0)
 
     def test_wrong_characters_keep_case(self):
         rng = random.Random(3)
@@ -34,6 +36,34 @@ class PlanTests(unittest.TestCase):
             self.assertNotEqual(lower, "a")
             self.assertEqual(upper, upper.upper())
             self.assertNotEqual(upper.lower(), "a")
+
+    def test_settings_reject_values_outside_the_allowed_sets(self):
+        valid = {
+            "start_delay": 2,
+            "default_speed": 30,
+            "mistake_frequency": 0,
+            "mistake_length": 5,
+            "start_hotkey": "Ctrl+Up",
+            "reset_hotkey": "Ctrl+Down",
+        }
+        self.assertEqual(settings_problems(valid), [])
+        problems = " ".join(
+            settings_problems(
+                {
+                    "start_delay": 4,
+                    "default_speed": 31,
+                    "mistake_frequency": 11,
+                    "mistake_length": "a",
+                    "start_hotkey": "s",
+                    "reset_hotkey": "Down",
+                }
+            )
+        )
+        self.assertIn("1, 2, or 3", problems)
+        self.assertIn("1 to 30", problems)
+        self.assertIn("0 to 10", problems)
+        self.assertIn("0 to 5", problems)
+        self.assertIn("not a single character", problems)
 
     def test_newline_pairs_are_one_typing_unit(self):
         self.assertEqual(read_unit("a\r\nb", 1), "\r\n")

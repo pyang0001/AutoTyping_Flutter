@@ -31,7 +31,7 @@ function paintSpeed(value) {
   const n = Number(value);
   speed.value = String(n);
   speedBox.textContent = String(n);
-  const pct = ((n - 1) / 9) * 100;
+  const pct = ((n - 1) / 29) * 100;
   speed.style.setProperty("--p", pct + "%");
 }
 
@@ -153,6 +153,7 @@ form.addEventListener("submit", async (event) => {
 
 document.querySelectorAll(".hotkey").forEach((input) => {
   input.addEventListener("focus", () => {
+    if (input.value !== "Press keys") input.dataset.previous = input.value;
     listening = input;
     input.classList.add("listening");
     input.value = "Press keys";
@@ -168,6 +169,14 @@ document.addEventListener("keydown", (event) => {
     if (event.shiftKey) names.push("Shift");
     if (event.altKey) names.push("Alt");
     if (event.metaKey) names.push("Win");
+    if (names.length === 0) {
+      errorEl.textContent = "Use a shortcut such as Ctrl+Up, not a single character like s.";
+      errorEl.hidden = false;
+      listening.value = listening.dataset.previous || "";
+      listening.classList.remove("listening");
+      listening = null;
+      return;
+    }
     names.push(keyName(event));
     listening.value = names.join("+");
     listening.classList.remove("listening");

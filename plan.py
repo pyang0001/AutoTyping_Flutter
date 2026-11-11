@@ -65,9 +65,9 @@ def should_mistake(rng: random.Random, per_hundred: int, unit: str) -> bool:
 
 
 def sample_mistake_length(rng: random.Random, average: int) -> int:
-    avg = max(1, min(20, average))
-    if avg == 1:
-        return 1
+    avg = max(0, min(5, average))
+    if avg <= 1:
+        return avg
     roll = rng.randrange(4)
     if roll == 0:
         return avg - 1
