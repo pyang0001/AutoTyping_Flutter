@@ -88,13 +88,21 @@ function paint(next) {
   state = next;
   phaseEl.textContent = label(next.phase);
   phaseEl.classList.toggle("paused", next.phase === "paused");
-  document.querySelector("#pause-mark").hidden = next.phase !== "paused";
+  phaseEl.classList.toggle("starting", next.phase === "waiting");
+  const userPaused = next.phase === "paused" && next.pause_reason === "user";
+  const focusPaused = next.phase === "paused" && next.pause_reason === "focus";
+  document.querySelector("#pause-mark").hidden = !userPaused;
+  document.querySelector("#focus-pause").hidden = !focusPaused;
+  const countdown = document.querySelector("#count-overlay");
+  countdown.hidden = next.phase !== "waiting";
+  countdown.textContent = String(next.seconds_left || 1);
   countEl.textContent = next.index + "/" + next.total;
   const width = next.fraction > 0 ? Math.max(8, next.fraction * 100) : 8;
   bar.style.width = (next.fraction > 0 ? width : 8) + (next.fraction > 0 ? "%" : "px");
   const running = next.running;
   playIcon.classList.toggle("is-hidden", running);
   pauseIcon.classList.toggle("is-hidden", !running);
+  play.classList.toggle("busy", running);
   play.setAttribute("aria-label", running ? "Pause" : "Start");
   text.readOnly = running;
   const editingText = document.activeElement === text || editTarget === text;
@@ -106,14 +114,21 @@ function paint(next) {
   keepCaretInEditableText();
   if (!dragging) paintSpeed(next.speed);
   const s = next.settings;
-  shortcuts.textContent = next.phase === "paused"
-    ? "Paused - press " + s.start_hotkey + " to resume"
-    : s.start_hotkey + " Start / Pause    " + s.reset_hotkey + " Reset";
+  let status = "";
+  if (next.phase === "waiting") {
+    status = "Starting in " + (next.seconds_left || 1) + " s - click where you want to type";
+  } else if (focusPaused) {
+    status = "Paused: the window being typed into lost focus. Press " + s.start_hotkey + ", then click where to type.";
+  } else if (userPaused) {
+    status = "Paused - press " + s.start_hotkey + " to resume";
+  }
+  shortcuts.textContent = status || (s.start_hotkey + " Start / Pause    " + s.reset_hotkey + " Reset");
+  shortcuts.classList.toggle("status", !!status);
   if (document.activeElement !== onTop) onTop.checked = !!s.always_on_top;
 }
 
 function label(phase) {
-  return { ready: "Ready", waiting: "Waiting", typing: "Typing", paused: "Paused", done: "Done" }[phase] || "Ready";
+  return { ready: "Ready", waiting: "Starting", typing: "Typing", paused: "Paused", done: "Done" }[phase] || "Ready";
 }
 
 async function post(url, body) {

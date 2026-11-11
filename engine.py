@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import math
 import random
 import sys
 import threading
@@ -125,6 +126,8 @@ class TyperEngine:
         self.index = 0
         self.speed = self.settings["default_speed"]
         self.phase = "ready"
+        self._seconds_left = 0
+        self._pause_reason = ""
         self._generation = 0
         self._rng = random.Random()
         self._lock = threading.Lock()
@@ -148,6 +151,8 @@ class TyperEngine:
                 "speed": self.speed,
                 "text": self.text,
                 "running": self.phase in ("waiting", "typing"),
+                "seconds_left": self._seconds_left if self.phase == "waiting" else 0,
+                "pause_reason": self._pause_reason if self.phase == "paused" else "",
                 "settings": dict(self.settings),
                 "can_type": sys.platform == "win32",
             }
@@ -199,6 +204,8 @@ class TyperEngine:
             if self.phase in ("waiting", "typing"):
                 self._generation += 1
                 self.phase = "paused"
+                self._pause_reason = "user"
+                self._seconds_left = 0
                 return
             if text is not None and self.phase not in ("waiting", "typing"):
                 if text != self.text:
@@ -219,7 +226,9 @@ class TyperEngine:
             self._generation += 1
             generation = self._generation
             self.phase = "waiting"
+            self._pause_reason = ""
             delay = self.settings["start_delay"]
+            self._seconds_left = max(1, int(delay))
             frequency = self.settings["mistake_frequency"]
             length = self.settings["mistake_length"]
         threading.Thread(
@@ -234,6 +243,8 @@ class TyperEngine:
             self._generation += 1
             self.index = 0
             self.phase = "ready"
+            self._pause_reason = ""
+            self._seconds_left = 0
 
     def set_always_on_top(self, value: bool) -> None:
         with self._lock:
@@ -256,33 +267,41 @@ class TyperEngine:
         self._hotkeys_suspended = suspended
         self._request_rebind()
 
+    def _mark_paused(self, generation: int, reason: str) -> bool:
+        with self._lock:
+            if self._generation != generation or self.phase not in ("waiting", "typing"):
+                return False
+            self.phase = "paused"
+            self._pause_reason = reason
+            self._seconds_left = 0
+            return True
+
     def _run(self, generation: int, delay: int, frequency: int, length: int) -> None:
-        slices = max(1, int(delay * 1000 / 50)) if delay else 1
-        if delay == 0:
-            slices = 1
-        for _ in range(slices):
+        deadline = time.monotonic() + max(0, delay)
+        while time.monotonic() < deadline:
+            remaining = deadline - time.monotonic()
+            with self._lock:
+                if not self._alive(generation, "waiting"):
+                    return
+                self._seconds_left = max(1, math.ceil(remaining))
             time.sleep(0.05)
-            if not self._alive(generation, "waiting"):
-                return
-        if delay == 0:
-            pass
         give_up = time.monotonic() + 30
         while _this_process_is_foreground():
             if not self._alive(generation, "waiting"):
                 return
             if time.monotonic() > give_up:
-                with self._lock:
-                    if self._generation == generation:
-                        self.phase = "paused"
+                self._mark_paused(generation, "focus")
                 return
             time.sleep(0.08)
+        target = _foreground_hwnd()
         with self._lock:
             if not self._alive(generation, "waiting"):
                 return
             self.phase = "typing"
-        self._type_loop(generation, frequency, length)
+            self._seconds_left = 0
+        self._type_loop(generation, frequency, length, target)
 
-    def _type_loop(self, generation: int, frequency: int, length: int) -> None:
+    def _type_loop(self, generation: int, frequency: int, length: int, target: int) -> None:
         while True:
             with self._lock:
                 if not self._alive(generation, "typing"):
@@ -294,10 +313,9 @@ class TyperEngine:
                 speed = self.speed
             if not unit:
                 break
-            if _this_process_is_foreground():
-                with self._lock:
-                    if self._generation == generation:
-                        self.phase = "paused"
+            current = _foreground_hwnd()
+            if _this_process_is_foreground() or (target and current and current != target):
+                self._mark_paused(generation, "focus")
                 return
             if not self._wait_modifiers(generation):
                 return
@@ -316,9 +334,7 @@ class TyperEngine:
                             return
                 _type_unit(unit)
             except OSError:
-                with self._lock:
-                    if self._generation == generation:
-                        self.phase = "paused"
+                self._mark_paused(generation, "user")
                 return
             with self._lock:
                 if not self._alive(generation, "typing"):
@@ -502,13 +518,20 @@ def _win32():
     return user32, kernel32
 
 
+def _foreground_hwnd() -> int:
+    if sys.platform != "win32":
+        return 0
+    user32, _kernel32 = _win32()
+    return int(user32.GetForegroundWindow() or 0)
+
+
 def _this_process_is_foreground() -> bool:
     if sys.platform != "win32":
         return False
     import ctypes
 
     user32, kernel32 = _win32()
-    hwnd = user32.GetForegroundWindow()
+    hwnd = _foreground_hwnd()
     if not hwnd:
         return False
     pid = wintypes_dword()

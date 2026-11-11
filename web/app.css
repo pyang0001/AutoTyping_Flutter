@@ -67,7 +67,8 @@ h1 {
   font-size: 13px;
 }
 
-.badge.paused {
+.badge.paused,
+.badge.starting {
   background: #5a3d12;
   color: var(--caret);
 }
@@ -171,6 +172,45 @@ textarea {
   border-radius: 6px;
   background: var(--caret);
 }
+
+.count-overlay {
+  position: absolute;
+  inset: 0 0 16px;
+  z-index: 2;
+  display: grid;
+  place-items: center;
+  color: var(--green);
+  font-size: 92px;
+  font-weight: 650;
+  line-height: 1;
+  pointer-events: none;
+}
+
+.count-overlay[hidden] { display: none; }
+
+.focus-pause {
+  position: absolute;
+  top: 14px;
+  right: 18px;
+  z-index: 2;
+  display: flex;
+  gap: 6px;
+  pointer-events: none;
+}
+
+.focus-pause[hidden] { display: none; }
+
+.focus-pause span {
+  width: 8px;
+  height: 22px;
+  border-radius: 3px;
+  background: var(--caret);
+}
+
+.play.busy { background: var(--caret); }
+.play.busy svg { fill: #3a2504; }
+
+.shortcuts.status { color: var(--caret); }
 
 textarea {
   z-index: 1;
