@@ -1,4 +1,5 @@
 const text = document.querySelector("#text");
+const highlight = document.querySelector("#highlight");
 const phaseEl = document.querySelector("#phase");
 const countEl = document.querySelector("#count");
 const bar = document.querySelector("#bar");
@@ -35,6 +36,38 @@ function paintSpeed(value) {
   speed.style.setProperty("--p", pct + "%");
 }
 
+function escapeHtml(value) {
+  return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
+let savedPrefix = "";
+let lastValue = "";
+
+function renderHighlight(value, index) {
+  const at = Math.max(0, Math.min(index, value.length));
+  highlight.innerHTML = '<span class="typed">' + escapeHtml(value.slice(0, at)) + "</span>" + escapeHtml(value.slice(at));
+  highlight.scrollTop = text.scrollTop;
+  highlight.scrollLeft = text.scrollLeft;
+}
+
+function rememberText(value, index) {
+  const at = Math.max(0, Math.min(index, value.length));
+  savedPrefix = value.slice(0, at);
+  lastValue = value;
+}
+
+function keepCaretInEditableText() {
+  if (!state) return;
+  const index = state.running ? state.index : savedPrefix.length;
+  const start = text.selectionStart ?? 0;
+  const end = text.selectionEnd ?? start;
+  if (state.running) {
+    if (start !== index || end !== index) text.setSelectionRange(index, index);
+    return;
+  }
+  if (start === end && start < index) text.setSelectionRange(index, index);
+}
+
 function paint(next) {
   state = next;
   phaseEl.textContent = label(next.phase);
@@ -48,6 +81,10 @@ function paint(next) {
   text.readOnly = running;
   const editingText = document.activeElement === text || editTarget === text;
   if (!editingText && text.value !== next.text) text.value = next.text;
+  if (!text.value.startsWith(next.text.slice(0, next.index))) text.value = next.text;
+  rememberText(text.value, next.index);
+  renderHighlight(text.value, next.index);
+  keepCaretInEditableText();
   if (!dragging) paintSpeed(next.speed);
   const s = next.settings;
   shortcuts.textContent = s.start_hotkey + " Start / Pause    " + s.reset_hotkey + " Reset";
@@ -74,11 +111,42 @@ async function refresh() {
   paint(await response.json());
 }
 
+function editTouchesTyped(event) {
+  if (!state || state.running) return true;
+  const start = text.selectionStart ?? 0;
+  const end = text.selectionEnd ?? start;
+  const index = savedPrefix.length;
+  if (start < index) return true;
+  const kind = event.inputType || "";
+  return kind.includes("Backward") && start === index && end === index;
+}
+
+text.addEventListener("beforeinput", (event) => {
+  if (!editTouchesTyped(event)) return;
+  event.preventDefault();
+});
+
 text.addEventListener("input", () => {
-  if (state && state.running) return;
-  const value = text.value;
-  countEl.textContent = "0/" + value.length;
-  post("/api/text", { text: value }).then(paint).catch(() => {});
+  if (!state || state.running || !text.value.startsWith(savedPrefix)) {
+    text.value = lastValue;
+    keepCaretInEditableText();
+    renderHighlight(text.value, savedPrefix.length);
+    return;
+  }
+  lastValue = text.value;
+  renderHighlight(text.value, savedPrefix.length);
+  countEl.textContent = savedPrefix.length + "/" + text.value.length;
+  post("/api/text", { text: text.value, index: savedPrefix.length }).then(paint).catch(() => {});
+});
+
+text.addEventListener("scroll", () => {
+  highlight.scrollTop = text.scrollTop;
+  highlight.scrollLeft = text.scrollLeft;
+});
+
+document.addEventListener("selectionchange", () => {
+  if (document.activeElement !== text) return;
+  keepCaretInEditableText();
 });
 
 play.addEventListener("click", async () => {
@@ -342,6 +410,14 @@ async function readClipboard() {
   return "";
 }
 
+function editableRange(field) {
+  if (field !== text) return !field.readOnly && !field.disabled;
+  if (!state || state.running || field.readOnly) return false;
+  const start = field.selectionStart ?? 0;
+  const end = field.selectionEnd ?? start;
+  return start >= savedPrefix.length && end >= savedPrefix.length;
+}
+
 function replaceSelection(target, insert) {
   const start = target.selectionStart ?? target.value.length;
   const end = target.selectionEnd ?? start;
@@ -354,7 +430,7 @@ document.querySelectorAll("#text, .row input").forEach((field) => {
     if (field.classList.contains("hotkey")) return;
     event.preventDefault();
     editTarget = field;
-    const locked = field.readOnly || field.disabled;
+    const locked = field === text ? !editableRange(field) : field.readOnly || field.disabled;
     editMenu.querySelector("[data-edit='cut']").disabled = locked;
     editMenu.querySelector("[data-edit='paste']").disabled = locked;
     const menuWidth = 148;
@@ -391,7 +467,7 @@ editMenu.addEventListener("click", async (event) => {
     return;
   }
   if (command === "cut") {
-    if (target.readOnly || !selected) return;
+    if (!editableRange(target) || !selected) return;
     if (document.execCommand("cut")) {
       target.dispatchEvent(new Event("input", { bubbles: true }));
       return;
@@ -405,7 +481,7 @@ editMenu.addEventListener("click", async (event) => {
     return;
   }
   if (command === "paste") {
-    if (target.readOnly) return;
+    if (!editableRange(target)) return;
     if (document.execCommand("paste")) return;
     const clip = await readClipboard();
     if (clip) replaceSelection(target, clip);

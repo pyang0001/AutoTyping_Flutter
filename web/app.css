@@ -93,18 +93,49 @@ h1 {
   overflow: hidden;
 }
 
-textarea {
+.sheet {
+  position: relative;
   flex: 1;
-  width: 100%;
-  resize: none;
+  min-height: 0;
+}
+
+.highlight,
+textarea {
+  position: absolute;
+  inset: 0;
+  margin: 0;
   border: 0;
-  outline: none;
-  background: transparent;
-  color: var(--text);
-  caret-color: var(--caret);
+  padding: 16px 28px 36px 18px;
+  font-family: "Segoe UI", sans-serif;
   font-size: 16px;
   line-height: 1.55;
-  padding: 16px 28px 36px 18px;
+  letter-spacing: 0;
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+  word-wrap: break-word;
+  tab-size: 4;
+  overflow: auto;
+}
+
+.highlight {
+  color: var(--text);
+  pointer-events: none;
+  z-index: 0;
+}
+
+.highlight::-webkit-scrollbar { width: 12px; height: 12px; }
+.highlight::-webkit-scrollbar-thumb { background: transparent; }
+
+.typed { color: var(--green); }
+
+textarea {
+  z-index: 1;
+  resize: none;
+  outline: none;
+  background: transparent;
+  color: transparent;
+  -webkit-text-fill-color: transparent;
+  caret-color: #f4f6fb;
   cursor: text;
   user-select: text;
   -webkit-user-select: text;

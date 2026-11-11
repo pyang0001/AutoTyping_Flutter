@@ -152,13 +152,43 @@ class TyperEngine:
                 "can_type": sys.platform == "win32",
             }
 
-    def set_text(self, value: str) -> None:
+    def set_text(self, value: str, _index: int | None = None) -> None:
         with self._lock:
             if self.phase in ("waiting", "typing"):
                 return
+            prefix = self.text[: self.index]
+            if not value.startswith(prefix):
+                return
             self.text = value
-            self.index = 0
+            self.index = min(self.index, len(self.text))
+            self._place_phase()
+
+    def set_index(self, value: int) -> None:
+        with self._lock:
+            if self.phase in ("waiting", "typing"):
+                return
+            self.index = self._clamp_index(value)
+            self._place_phase()
+
+    def _clamp_index(self, value: int) -> int:
+        try:
+            number = int(value)
+        except (TypeError, ValueError):
+            number = self.index
+        return max(0, min(len(self.text), number))
+
+    def _place_phase(self) -> None:
+        if self.phase in ("waiting", "typing"):
+            return
+        if not self.text or self.index <= 0:
             self.phase = "ready"
+            return
+        if self.index >= len(self.text):
+            if self.phase == "paused":
+                self.phase = "done"
+            return
+        if self.phase == "done":
+            self.phase = "paused"
 
     def set_speed(self, value: int) -> None:
         with self._lock:
@@ -172,14 +202,19 @@ class TyperEngine:
                 return
             if text is not None and self.phase not in ("waiting", "typing"):
                 if text != self.text:
-                    self.text = text
-                    self.index = 0
-                    self.phase = "ready"
+                    prefix = self.text[: self.index]
+                    if text.startswith(prefix):
+                        self.text = text
+                        self.index = min(self.index, len(self.text))
+                    else:
+                        self.text = text
+                        self.index = 0
+                        self.phase = "ready"
             if speed is not None:
                 self.speed = max(1, min(30, int(speed)))
             if not self.text:
                 return
-            if self.phase == "done" or self.index >= len(self.text):
+            if self.index >= len(self.text):
                 self.index = 0
             self._generation += 1
             generation = self._generation

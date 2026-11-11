@@ -51,7 +51,11 @@ class Handler(BaseHTTPRequestHandler):
         path = urlparse(self.path).path
         payload = self._read_json()
         if path == "/api/text":
-            ENGINE.set_text(str(payload.get("text", "")))
+            ENGINE.set_text(str(payload.get("text", "")), payload.get("index"))
+            self._json(200, ENGINE.snapshot())
+            return
+        if path == "/api/index":
+            ENGINE.set_index(payload.get("index", 0))
             self._json(200, ENGINE.snapshot())
             return
         if path == "/api/toggle":

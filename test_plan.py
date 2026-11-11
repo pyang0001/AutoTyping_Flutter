@@ -1,7 +1,7 @@
 import random
 import unittest
 
-from engine import settings_problems
+from engine import TyperEngine, settings_problems
 from plan import (
     is_newline,
     read_unit,
@@ -64,6 +64,40 @@ class PlanTests(unittest.TestCase):
         self.assertIn("0 to 10", problems)
         self.assertIn("0 to 5", problems)
         self.assertIn("not a single character", problems)
+
+    def test_typed_prefix_stays_when_the_rest_is_edited(self):
+        engine = TyperEngine()
+        engine.set_text("Hello world")
+        engine.phase = "paused"
+        engine.set_index(6)
+        engine.set_text("Hello there", 6)
+        self.assertEqual(engine.text, "Hello there")
+        self.assertEqual(engine.index, 6)
+        engine.set_text("Yello there", 6)
+        self.assertEqual(engine.text, "Hello there")
+        self.assertEqual(engine.index, 6)
+        engine.phase = "typing"
+        engine.set_text("Hello people", 6)
+        self.assertEqual(engine.text, "Hello there")
+
+    def test_cursor_marks_typed_letters_and_can_move(self):
+        engine = TyperEngine()
+        engine.set_text("Hello")
+        engine.set_index(5)
+        self.assertEqual(engine.index, 5)
+        self.assertEqual(engine.phase, "ready")
+        engine.set_index(2)
+        self.assertEqual(engine.snapshot()["index"], 2)
+        self.assertEqual(engine.phase, "ready")
+        engine.phase = "done"
+        engine.set_index(2)
+        self.assertEqual(engine.phase, "paused")
+        engine.set_index(0)
+        self.assertEqual(engine.phase, "ready")
+        engine.phase = "paused"
+        engine.set_index(99)
+        self.assertEqual(engine.index, 5)
+        self.assertEqual(engine.phase, "done")
 
     def test_newline_pairs_are_one_typing_unit(self):
         self.assertEqual(read_unit("a\r\nb", 1), "\r\n")
