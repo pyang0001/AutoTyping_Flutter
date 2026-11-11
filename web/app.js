@@ -488,8 +488,11 @@ document.querySelector("#open-settings").addEventListener("click", async () => {
 });
 
 async function closeSettings() {
+  document.querySelectorAll(".hotkey").forEach((el) => {
+    el.classList.remove("listening");
+    if (el.value === "Press keys") el.value = el.dataset.previous || "";
+  });
   listening = null;
-  document.querySelectorAll(".hotkey").forEach((el) => el.classList.remove("listening"));
   dialog.close();
   await post("/api/hotkeys", { suspended: false });
 }
@@ -506,8 +509,8 @@ form.addEventListener("submit", async (event) => {
       default_speed: fields.default_speed.value,
       mistake_frequency: fields.mistake_frequency.value,
       mistake_length: fields.mistake_length.value,
-      start_hotkey: fields.start_hotkey.value,
-      reset_hotkey: fields.reset_hotkey.value,
+      start_hotkey: hotkeyValue(fields.start_hotkey),
+      reset_hotkey: hotkeyValue(fields.reset_hotkey),
       always_on_top: onTop.checked,
     });
     paint(saved);
@@ -517,12 +520,32 @@ form.addEventListener("submit", async (event) => {
   }
 });
 
+function hotkeyValue(input) {
+  if (input.value === "Press keys") return input.dataset.previous || "";
+  return input.value;
+}
+
+function releaseHotkey(input) {
+  input.classList.remove("listening");
+  if (input.value === "Press keys") input.value = input.dataset.previous || "";
+  if (listening === input) listening = null;
+}
+
+function beginHotkey(input) {
+  document.querySelectorAll(".hotkey").forEach((other) => {
+    if (other !== input) releaseHotkey(other);
+  });
+  if (listening === input) return;
+  if (input.value !== "Press keys") input.dataset.previous = input.value;
+  listening = input;
+  input.classList.add("listening");
+  input.value = "Press keys";
+}
+
 document.querySelectorAll(".hotkey").forEach((input) => {
-  input.addEventListener("focus", () => {
-    if (input.value !== "Press keys") input.dataset.previous = input.value;
-    listening = input;
-    input.classList.add("listening");
-    input.value = "Press keys";
+  input.addEventListener("focus", () => beginHotkey(input));
+  input.addEventListener("blur", () => {
+    if (listening === input) releaseHotkey(input);
   });
 });
 
@@ -551,7 +574,11 @@ document.addEventListener("keydown", (event) => {
   if (inField && !field.classList.contains("hotkey") && isEditShortcut(event)) return;
   if (listening) {
     event.preventDefault();
-    if (["Control", "Shift", "Alt", "Meta"].includes(event.key)) return;
+    event.stopPropagation();
+    if (event.key === "Escape" || ["Control", "Shift", "Alt", "Meta"].includes(event.key)) {
+      if (event.key === "Escape") releaseHotkey(listening);
+      return;
+    }
     const names = [];
     if (event.ctrlKey) names.push("Ctrl");
     if (event.shiftKey) names.push("Shift");
@@ -559,12 +586,11 @@ document.addEventListener("keydown", (event) => {
     if (event.metaKey) names.push("Win");
     if (names.length === 0) {
       showAlert("Use a shortcut such as Ctrl+Up, not a single character like s.");
-      listening.value = listening.dataset.previous || "";
-      listening.classList.remove("listening");
-      listening = null;
+      releaseHotkey(listening);
       return;
     }
     names.push(keyName(event));
+    listening.dataset.previous = names.join("+");
     listening.value = names.join("+");
     listening.classList.remove("listening");
     listening = null;
