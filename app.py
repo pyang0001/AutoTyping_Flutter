@@ -181,7 +181,7 @@ def _run_webview(local: str) -> bool:
             local,
             width=1040,
             height=660,
-            min_size=(640, 420),
+            min_size=(681, 453),
             background_color="#1C1F2B",
             text_select=True,
             on_top=bool(ENGINE.settings.get("always_on_top")),

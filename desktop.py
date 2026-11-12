@@ -11,6 +11,8 @@ from ctypes import wintypes
 from pathlib import Path
 
 APP_HWND = 0
+MIN_WIDTH = 681
+MIN_HEIGHT = 453
 
 _ENUM = ctypes.WINFUNCTYPE(ctypes.c_bool, ctypes.c_void_p, ctypes.c_void_p)
 
@@ -237,14 +239,14 @@ def _keep_large_enough(stop: list[bool]) -> None:
         if user32.GetWindowRect(hwnd, ctypes.byref(rect)):
             width = rect.right - rect.left
             height = rect.bottom - rect.top
-            if 0 < width < 640 or 0 < height < 420:
+            if 0 < width < MIN_WIDTH or 0 < height < MIN_HEIGHT:
                 user32.SetWindowPos(
                     hwnd,
                     None,
                     rect.left,
                     rect.top,
-                    max(width, 640),
-                    max(height, 420),
+                    max(width, MIN_WIDTH),
+                    max(height, MIN_HEIGHT),
                     0x0004 | 0x0010,
                 )
         time.sleep(0.2)
