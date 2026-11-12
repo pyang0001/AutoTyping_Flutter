@@ -17,18 +17,18 @@ _ENUM = ctypes.WINFUNCTYPE(ctypes.c_bool, ctypes.c_void_p, ctypes.c_void_p)
 
 def browser_path() -> str | None:
     roots = [
-        os.environ.get("PROGRAMFILES(X86)", ""),
         os.environ.get("PROGRAMFILES", ""),
+        os.environ.get("PROGRAMFILES(X86)", ""),
         os.environ.get("LOCALAPPDATA", ""),
     ]
     names = (
-        r"Microsoft\Edge\Application\msedge.exe",
         r"Google\Chrome\Application\chrome.exe",
+        r"Microsoft\Edge\Application\msedge.exe",
     )
-    for root in roots:
-        if not root:
-            continue
-        for name in names:
+    for name in names:
+        for root in roots:
+            if not root:
+                continue
             candidate = Path(root) / name
             if candidate.is_file():
                 return str(candidate)
@@ -279,7 +279,7 @@ def run_edge_window(url: str, on_top: bool, on_ready=None) -> bool:
     executable = browser_path()
     if executable is None:
         return False
-    folder = "app-window"
+    folder = "chrome-window" if executable.lower().endswith("chrome.exe") else "edge-window"
     hwnd = _launch_profile(executable, url, folder)
     if not hwnd:
         profile = Path(os.environ.get("LOCALAPPDATA", ".")) / "AutoTyper" / folder
