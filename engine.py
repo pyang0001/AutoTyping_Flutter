@@ -145,6 +145,10 @@ class TyperEngine:
         self._pause_reason = ""
         self._typo = ""
         self._speed_changed_at = 0.0
+        self._speed_drag = False
+        self._slider = None
+        self._ui_hwnd = 0
+        self._target_hwnd = 0
         self._generation = 0
         self._run_hook = None
         self._rng = random.Random()
@@ -223,15 +227,117 @@ class TyperEngine:
     def set_run_hook(self, hook) -> None:
         self._run_hook = hook
 
-    def set_speed(self, value: int) -> None:
+    def set_speed(self, value: int, dragging: bool | None = None, slider=None) -> None:
+        foreground = _foreground_hwnd()
         with self._lock:
             self.speed = max(1, min(30, int(value)))
             self._speed_changed_at = time.monotonic()
+            if dragging is not None:
+                self._speed_drag = bool(dragging)
+            if isinstance(slider, (tuple, list)) and len(slider) == 2:
+                self._slider = (float(slider[0]), float(slider[1]))
+            if foreground and foreground != self._target_hwnd:
+                self._ui_hwnd = foreground
 
     def _speed_is_live(self) -> bool:
         with self._lock:
             changed = self._speed_changed_at
         return changed > 0 and time.monotonic() - changed < 1.5
+
+    def _speed_drag_active(self) -> bool:
+        with self._lock:
+            drag = self._speed_drag
+        if not drag:
+            return False
+        if sys.platform == "win32" and not _left_button_down():
+            with self._lock:
+                self._speed_drag = False
+                self._speed_changed_at = time.monotonic()
+            return False
+        return True
+
+    def _our_ui_is_foreground(self) -> bool:
+        if _this_process_is_foreground():
+            return True
+        current = _foreground_hwnd()
+        if not current:
+            return False
+        with self._lock:
+            ui = self._ui_hwnd
+            target = self._target_hwnd
+        if ui and current == ui and current != target:
+            return True
+        app = _app_hwnd()
+        if not app:
+            return False
+        if current == app or _root_hwnd(current) == app:
+            return True
+        return False
+
+    def _typing_mode(self, target: int) -> str:
+        current = _foreground_hwnd()
+        self._apply_cursor_speed()
+        if target and current == target:
+            self._speed_drag_active()
+            return "direct"
+        if self._speed_drag_active():
+            _focus_hwnd(target)
+            time.sleep(0.01)
+            if not _foreground_hwnd() or _foreground_hwnd() == target:
+                return "direct"
+            return "background"
+        ours = self._our_ui_is_foreground()
+        action = focus_action(ours, current, target, self._speed_is_live())
+        if action == "pause" and ours:
+            deadline = time.monotonic() + 0.25
+            while time.monotonic() < deadline and action == "pause":
+                time.sleep(0.04)
+                if self._speed_drag_active():
+                    _focus_hwnd(target)
+                    time.sleep(0.01)
+                    if not _foreground_hwnd() or _foreground_hwnd() == target:
+                        return "direct"
+                    return "background"
+                current = _foreground_hwnd()
+                if target and current == target:
+                    return "direct"
+                ours = self._our_ui_is_foreground()
+                action = focus_action(ours, current, target, self._speed_is_live())
+        if action == "type":
+            return "direct"
+        if action == "restore":
+            if self._speed_drag_active():
+                return "background"
+            _focus_hwnd(target)
+            time.sleep(0.02)
+            current = _foreground_hwnd()
+            if not current or current == target:
+                return "direct"
+            if self._speed_drag_active() or self._speed_is_live():
+                return "background"
+            return "retry"
+        return "pause"
+
+    def _apply_cursor_speed(self) -> None:
+        if not self._speed_drag_active():
+            return
+        with self._lock:
+            span = self._slider
+        if not span:
+            return
+        left, right = span
+        x = _cursor_x()
+        if x is None or right - left < 4:
+            return
+        portion = (x - left) / (right - left)
+        if portion < 0:
+            portion = 0
+        elif portion > 1:
+            portion = 1
+        speed = int(round(1 + portion * 29))
+        with self._lock:
+            self.speed = max(1, min(30, speed))
+            self._speed_changed_at = time.monotonic()
 
     def _note_run(self, active: bool) -> None:
         hook = self._run_hook
@@ -340,7 +446,7 @@ class TyperEngine:
                 self._seconds_left = max(1, math.ceil(remaining))
             time.sleep(0.05)
         give_up = time.monotonic() + 30
-        while _this_process_is_foreground():
+        while self._our_ui_is_foreground():
             if not self._alive(generation, "waiting"):
                 return
             if time.monotonic() > give_up:
@@ -348,14 +454,16 @@ class TyperEngine:
                 return
             time.sleep(0.08)
         target = _foreground_hwnd()
+        focus = _focused_child(target)
         with self._lock:
             if not self._alive(generation, "waiting"):
                 return
             self.phase = "typing"
             self._seconds_left = 0
-        self._type_loop(generation, frequency, length, target)
+            self._target_hwnd = target
+        self._type_loop(generation, frequency, length, target, focus)
 
-    def _type_loop(self, generation: int, frequency: int, length: int, target: int) -> None:
+    def _type_loop(self, generation: int, frequency: int, length: int, target: int, focus: int) -> None:
         while True:
             with self._lock:
                 if not self._alive(generation, "typing"):
@@ -368,26 +476,17 @@ class TyperEngine:
                 speed = self.speed
             if not unit:
                 break
-            current = _foreground_hwnd()
-            ours = _this_process_is_foreground()
-            action = focus_action(ours, current, target, self._speed_is_live())
-            if action == "pause" and ours:
-                time.sleep(0.15)
-                action = focus_action(
-                    _this_process_is_foreground(),
-                    _foreground_hwnd(),
-                    target,
-                    self._speed_is_live(),
-                )
-            if action == "restore":
-                _focus_hwnd(target)
-                time.sleep(0.02)
-                if _this_process_is_foreground() or _foreground_hwnd() != target:
-                    time.sleep(0.04)
-                    continue
-            elif action == "pause":
+            if target and not self._our_ui_is_foreground() and _foreground_hwnd() == target:
+                focus = _focused_child(target) or focus
+            mode = self._typing_mode(target)
+            if mode == "retry":
+                time.sleep(0.04)
+                continue
+            if mode == "pause":
                 self._mark_paused(generation, "focus")
                 return
+            background = mode == "background"
+            sink = focus or target
             if not self._wait_modifiers(generation):
                 return
             try:
@@ -399,7 +498,10 @@ class TyperEngine:
                             if not self._alive(generation, "typing"):
                                 return
                             self._typo += wrong
-                        _type_unit(wrong)
+                        if background:
+                            _type_unit_to(sink, wrong)
+                        else:
+                            _type_unit(wrong)
                         if not self._pause(generation, speed, 1):
                             return
                     if not self._pause(generation, speed, 1.35):
@@ -409,11 +511,19 @@ class TyperEngine:
                             if not self._alive(generation, "typing"):
                                 return
                             self._typo = self._typo[:-1]
-                        _backspace()
+                        if background:
+                            _backspace_to(sink)
+                        else:
+                            _backspace()
                         if not self._pause(generation, speed, 0.45):
                             return
-                _type_unit(unit)
+                if background:
+                    _type_unit_to(sink, unit)
+                else:
+                    _type_unit(unit)
             except OSError:
+                if background:
+                    continue
                 self._mark_paused(generation, "user")
                 return
             with self._lock:
@@ -432,6 +542,7 @@ class TyperEngine:
         jitter = 0.82 + self._rng.random() * 0.36
         spent = 0.0
         while True:
+            self._apply_cursor_speed()
             with self._lock:
                 if not self._alive(generation, "typing"):
                     return False
@@ -609,15 +720,145 @@ def focus_action(ours: bool, current: int, target: int, speed_live: bool) -> str
     return "type"
 
 
+def _app_hwnd() -> int:
+    try:
+        import desktop
+    except Exception:
+        return 0
+    return int(getattr(desktop, "APP_HWND", 0) or 0)
+
+
+def _root_hwnd(hwnd: int) -> int:
+    if sys.platform != "win32" or not hwnd:
+        return 0
+    import ctypes
+
+    user32, _kernel32 = _win32()
+    user32.GetAncestor.argtypes = [ctypes.c_void_p, ctypes.c_uint]
+    user32.GetAncestor.restype = ctypes.c_void_p
+    return int(user32.GetAncestor(hwnd, 2) or 0)
+
+
+def _left_button_down() -> bool:
+    if sys.platform != "win32":
+        return False
+    import ctypes
+
+    user32, _kernel32 = _win32()
+    user32.GetAsyncKeyState.argtypes = [ctypes.c_int]
+    user32.GetAsyncKeyState.restype = ctypes.c_short
+    return bool(user32.GetAsyncKeyState(0x01) & 0x8000)
+
+
+def _cursor_x() -> float | None:
+    if sys.platform != "win32":
+        return None
+    import ctypes
+    from ctypes import wintypes
+
+    user32, _kernel32 = _win32()
+    user32.GetCursorPos.argtypes = [ctypes.POINTER(wintypes.POINT)]
+    user32.GetCursorPos.restype = ctypes.c_int
+    point = wintypes.POINT()
+    if not user32.GetCursorPos(ctypes.byref(point)):
+        return None
+    return float(point.x)
+
+
+def _focused_child(top: int) -> int:
+    if sys.platform != "win32" or not top:
+        return top
+    import ctypes
+    from ctypes import wintypes
+
+    class GUITHREADINFO(ctypes.Structure):
+        _fields_ = (
+            ("cbSize", ctypes.c_uint),
+            ("flags", ctypes.c_uint),
+            ("hwndActive", ctypes.c_void_p),
+            ("hwndFocus", ctypes.c_void_p),
+            ("hwndCapture", ctypes.c_void_p),
+            ("hwndMenuOwner", ctypes.c_void_p),
+            ("hwndMoveSize", ctypes.c_void_p),
+            ("hwndCaret", ctypes.c_void_p),
+            ("rcCaret", wintypes.RECT),
+        )
+
+    user32, _kernel32 = _win32()
+    user32.GetGUIThreadInfo.argtypes = [ctypes.c_uint, ctypes.POINTER(GUITHREADINFO)]
+    user32.GetGUIThreadInfo.restype = ctypes.c_int
+    info = GUITHREADINFO()
+    info.cbSize = ctypes.sizeof(info)
+    pid = wintypes.DWORD()
+    thread_id = user32.GetWindowThreadProcessId(top, ctypes.byref(pid))
+    if not thread_id or not user32.GetGUIThreadInfo(int(thread_id), ctypes.byref(info)):
+        return top
+    return int(info.hwndFocus or top)
+
+
+def _message_char(hwnd: int, char: str) -> None:
+    if sys.platform != "win32" or not hwnd or not char:
+        return
+    import ctypes
+
+    user32, _kernel32 = _win32()
+    user32.SendMessageTimeoutW.argtypes = [
+        ctypes.c_void_p,
+        ctypes.c_uint,
+        ctypes.c_size_t,
+        ctypes.c_ssize_t,
+        ctypes.c_uint,
+        ctypes.c_uint,
+        ctypes.POINTER(ctypes.c_size_t),
+    ]
+    user32.SendMessageTimeoutW.restype = ctypes.c_size_t
+    result = ctypes.c_size_t()
+    user32.SendMessageTimeoutW(hwnd, 0x0102, ord(char), 1, 0x0002, 40, ctypes.byref(result))
+
+
+def _type_unit_to(hwnd: int, unit: str) -> None:
+    if is_newline(unit):
+        _message_char(hwnd, "\r")
+        return
+    if unit == "\t":
+        _message_char(hwnd, "\t")
+        return
+    for char in unit:
+        _message_char(hwnd, char)
+
+
+def _backspace_to(hwnd: int) -> None:
+    _message_char(hwnd, "\b")
+
+
 def _focus_hwnd(hwnd: int) -> None:
     if sys.platform != "win32" or not hwnd:
         return
     import ctypes
 
-    user32, _kernel32 = _win32()
+    user32, kernel32 = _win32()
     user32.SetForegroundWindow.argtypes = [ctypes.c_void_p]
     user32.SetForegroundWindow.restype = ctypes.c_int
+    user32.BringWindowToTop.argtypes = [ctypes.c_void_p]
+    user32.BringWindowToTop.restype = ctypes.c_int
+    user32.IsIconic.argtypes = [ctypes.c_void_p]
+    user32.IsIconic.restype = ctypes.c_int
+    user32.ShowWindow.argtypes = [ctypes.c_void_p, ctypes.c_int]
+    user32.ShowWindow.restype = ctypes.c_int
+    user32.AttachThreadInput.argtypes = [ctypes.c_uint, ctypes.c_uint, ctypes.c_int]
+    user32.AttachThreadInput.restype = ctypes.c_int
+    foreground = int(user32.GetForegroundWindow() or 0)
+    foreground_thread = user32.GetWindowThreadProcessId(foreground, None) if foreground else 0
+    this_thread = kernel32.GetCurrentThreadId()
+    attached = False
+    if foreground_thread and foreground_thread != this_thread:
+        attached = bool(user32.AttachThreadInput(this_thread, int(foreground_thread), True))
+    if user32.IsIconic(hwnd):
+        user32.ShowWindow(hwnd, 9)
+    user32.BringWindowToTop(hwnd)
     user32.SetForegroundWindow(hwnd)
+    if attached:
+        user32.AttachThreadInput(this_thread, int(foreground_thread), False)
 
 
 def _foreground_hwnd() -> int:

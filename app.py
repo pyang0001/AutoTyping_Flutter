@@ -70,7 +70,16 @@ class Handler(BaseHTTPRequestHandler):
             self._json(200, ENGINE.snapshot())
             return
         if path == "/api/speed":
-            ENGINE.set_speed(int(payload.get("speed", 4)))
+            raw_drag = payload.get("dragging")
+            slider = payload.get("slider")
+            span = None
+            if isinstance(slider, dict) and "left" in slider and "right" in slider:
+                span = (slider.get("left"), slider.get("right"))
+            ENGINE.set_speed(
+                int(payload.get("speed", 4)),
+                None if raw_drag is None else bool(raw_drag),
+                span,
+            )
             self._json(200, ENGINE.snapshot())
             return
         if path == "/api/settings":

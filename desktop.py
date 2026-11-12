@@ -228,28 +228,181 @@ def set_run_style(active: bool) -> None:
     user32.SetWindowPos(APP_HWND, None, 0, 0, 0, 0, 0x0001 | 0x0002 | 0x0004 | 0x0010 | 0x0020)
 
 
-def _keep_large_enough(stop: list[bool]) -> None:
-    user32 = _user32()
+_EVENT_PROC = None
+
+
+def _cursor_point(user32):
+    point = wintypes.POINT()
+    user32.GetCursorPos.argtypes = [ctypes.POINTER(wintypes.POINT)]
+    user32.GetCursorPos.restype = ctypes.c_bool
+    if not user32.GetCursorPos(ctypes.byref(point)):
+        return None
+    return point
+
+
+def _clip_resize(user32, hwnd: int, edges: dict) -> None:
     rect = wintypes.RECT()
-    while not stop[0]:
-        hwnd = APP_HWND
-        if not hwnd or not user32.IsWindow(hwnd):
-            time.sleep(0.2)
-            continue
-        if user32.GetWindowRect(hwnd, ctypes.byref(rect)):
-            width = rect.right - rect.left
-            height = rect.bottom - rect.top
-            if 0 < width < MIN_WIDTH or 0 < height < MIN_HEIGHT:
-                user32.SetWindowPos(
-                    hwnd,
-                    None,
-                    rect.left,
-                    rect.top,
-                    max(width, MIN_WIDTH),
-                    max(height, MIN_HEIGHT),
-                    0x0004 | 0x0010,
-                )
-        time.sleep(0.2)
+    if not user32.GetWindowRect(hwnd, ctypes.byref(rect)):
+        return
+    point = _cursor_point(user32)
+    if point is None:
+        return
+    margin = 18
+    edges["left"] = point.x <= rect.left + margin
+    edges["right"] = point.x >= rect.right - margin
+    edges["top"] = point.y <= rect.top + margin
+    edges["bottom"] = point.y >= rect.bottom - margin
+    if not any(edges.values()):
+        return
+    clip = wintypes.RECT()
+    clip.left = user32.GetSystemMetrics(76)
+    clip.top = user32.GetSystemMetrics(77)
+    clip.right = clip.left + user32.GetSystemMetrics(78)
+    clip.bottom = clip.top + user32.GetSystemMetrics(79)
+    if edges["right"]:
+        clip.left = max(clip.left, rect.left + MIN_WIDTH)
+    if edges["left"]:
+        clip.right = min(clip.right, rect.right - MIN_WIDTH)
+    if edges["bottom"]:
+        clip.top = max(clip.top, rect.top + MIN_HEIGHT)
+    if edges["top"]:
+        clip.bottom = min(clip.bottom, rect.bottom - MIN_HEIGHT)
+    if clip.left >= clip.right or clip.top >= clip.bottom:
+        return
+    user32.ClipCursor.argtypes = [ctypes.c_void_p]
+    user32.ClipCursor.restype = ctypes.c_bool
+    user32.ClipCursor(ctypes.byref(clip))
+
+
+def _snap_minimum(user32, hwnd: int, edges: dict | None) -> None:
+    if not hwnd or not user32.IsWindow(hwnd):
+        return
+    rect = wintypes.RECT()
+    if not user32.GetWindowRect(hwnd, ctypes.byref(rect)):
+        return
+    width = rect.right - rect.left
+    height = rect.bottom - rect.top
+    if width >= MIN_WIDTH and height >= MIN_HEIGHT:
+        return
+    if width <= 0 or height <= 0:
+        return
+    new_width = max(width, MIN_WIDTH)
+    new_height = max(height, MIN_HEIGHT)
+    left, top = rect.left, rect.top
+    if edges and edges.get("left") and width < MIN_WIDTH:
+        left = rect.right - new_width
+    if edges and edges.get("top") and height < MIN_HEIGHT:
+        top = rect.bottom - new_height
+    user32.SetWindowPos(
+        hwnd,
+        None,
+        left,
+        top,
+        new_width,
+        new_height,
+        0x0004 | 0x0010,
+    )
+
+
+def _keep_large_enough(stop: list[bool]) -> None:
+    global _EVENT_PROC
+    user32 = _user32()
+    user32.GetSystemMetrics.argtypes = [ctypes.c_int]
+    user32.GetSystemMetrics.restype = ctypes.c_int
+    user32.GetAsyncKeyState.argtypes = [ctypes.c_int]
+    user32.GetAsyncKeyState.restype = ctypes.c_short
+    user32.ClipCursor.argtypes = [ctypes.c_void_p]
+    user32.ClipCursor.restype = ctypes.c_bool
+    user32.SetWinEventHook.restype = ctypes.c_void_p
+    user32.UnhookWinEvent.argtypes = [ctypes.c_void_p]
+    user32.UnhookWinEvent.restype = ctypes.c_bool
+    user32.PeekMessageW.argtypes = [
+        ctypes.POINTER(wintypes.MSG),
+        ctypes.c_void_p,
+        ctypes.c_uint,
+        ctypes.c_uint,
+        ctypes.c_uint,
+    ]
+    user32.PeekMessageW.restype = ctypes.c_bool
+    user32.TranslateMessage.argtypes = [ctypes.POINTER(wintypes.MSG)]
+    user32.DispatchMessageW.argtypes = [ctypes.POINTER(wintypes.MSG)]
+    user32.MsgWaitForMultipleObjects.argtypes = [
+        ctypes.c_uint,
+        ctypes.c_void_p,
+        ctypes.c_bool,
+        ctypes.c_uint,
+        ctypes.c_uint,
+    ]
+    user32.MsgWaitForMultipleObjects.restype = ctypes.c_uint
+    edges = {"left": False, "right": False, "top": False, "bottom": False}
+    sizing = {"on": False}
+
+    user32.GetAncestor.argtypes = [ctypes.c_void_p, ctypes.c_uint]
+    user32.GetAncestor.restype = ctypes.c_void_p
+
+    def same_window(hwnd) -> bool:
+        target = int(APP_HWND or 0)
+        current = int(hwnd or 0)
+        if not target or not current:
+            return False
+        if current == target:
+            return True
+        return int(user32.GetAncestor(current, 2) or 0) == target
+
+    def on_event(_hook, event, hwnd, _id_object, _id_child, _thread, _clock):
+        try:
+            if not same_window(hwnd):
+                return
+            target = int(APP_HWND or 0)
+            if event == 0x000A:
+                sizing["on"] = True
+                _clip_resize(user32, target, edges)
+            elif event == 0x000B:
+                sizing["on"] = False
+                user32.ClipCursor(None)
+                _snap_minimum(user32, target, edges)
+        except Exception:
+            return
+
+    proc_type = ctypes.WINFUNCTYPE(
+        None,
+        ctypes.c_void_p,
+        ctypes.c_uint,
+        ctypes.c_void_p,
+        ctypes.c_long,
+        ctypes.c_long,
+        ctypes.c_uint,
+        ctypes.c_uint,
+    )
+    _EVENT_PROC = proc_type(on_event)
+    user32.SetWinEventHook.argtypes = [
+        ctypes.c_uint,
+        ctypes.c_uint,
+        ctypes.c_void_p,
+        proc_type,
+        ctypes.c_ulong,
+        ctypes.c_ulong,
+        ctypes.c_uint,
+    ]
+    hook = user32.SetWinEventHook(0x000A, 0x000B, None, _EVENT_PROC, 0, 0, 0)
+    message = wintypes.MSG()
+    try:
+        while not stop[0]:
+            user32.MsgWaitForMultipleObjects(0, None, False, 50, 0x04FF)
+            while user32.PeekMessageW(ctypes.byref(message), None, 0, 0, 1):
+                user32.TranslateMessage(ctypes.byref(message))
+                user32.DispatchMessageW(ctypes.byref(message))
+            button_down = bool(user32.GetAsyncKeyState(0x01) & 0x8000)
+            if sizing["on"] and not button_down:
+                sizing["on"] = False
+                user32.ClipCursor(None)
+                _snap_minimum(user32, int(APP_HWND or 0), edges)
+            elif not button_down:
+                _snap_minimum(user32, int(APP_HWND or 0), None)
+    finally:
+        user32.ClipCursor(None)
+        if hook:
+            user32.UnhookWinEvent(hook)
 
 
 def _launch_profile(executable: str, url: str, folder: str) -> int:

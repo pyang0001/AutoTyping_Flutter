@@ -1,0 +1,13 @@
+---
+description: Rebuild the web app and the Windows UI after every change
+alwaysApply: true
+---
+
+# Build the apps
+
+After every change in this project, rebuild both applications before finishing.
+
+- Web application: `py -3 -m PyInstaller --noconfirm autotyper-web.spec`
+- Windows UI, which is the installable app: `py -3 -m PyInstaller --noconfirm autotyper.spec`
+
+The results are `dist\AutoTyper-1.0.0-web.exe` and `dist\AutoTyper-1.0.0-windows.exe`. Stop a running copy of that exe first if the build cannot overwrite it. Do not commit `dist/` or `build/`.

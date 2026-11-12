@@ -580,7 +580,7 @@ h2 { margin: 0; font-size: 22px; font-weight: 650; }
   cursor: pointer;
 }
 
-@media (max-width: 720px) {
+@media (max-width: 560px) {
   .app { padding: 16px 14px 12px; }
   h1 { font-size: 22px; }
   .controls { flex-wrap: wrap; }

@@ -124,7 +124,7 @@ function paint(next) {
   rememberText(text.value, index);
   renderHighlight(text.value, index, typo);
   keepCaretInEditableText();
-  if (!dragging) paintSpeed(next.speed);
+  paintSpeed(next.speed);
   const s = next.settings;
   let status = "";
   if (next.phase === "waiting") {
@@ -374,11 +374,21 @@ onTop.addEventListener("change", async () => {
 
 let speedTimer = null;
 
-function sendSpeed() {
+function sliderSpan() {
+  const rect = speed.getBoundingClientRect();
+  const ratio = window.devicePixelRatio || 1;
+  const borderX = Math.max(0, (window.outerWidth - window.innerWidth) / 2);
+  const left = window.screenX + borderX + rect.left;
+  const right = window.screenX + borderX + rect.right;
+  return { left: left * ratio, right: right * ratio };
+}
+
+function sendSpeed(isDragging) {
   const n = Math.max(1, Math.min(30, Math.round(Number(speed.value) || 1)));
-  post("/api/speed", { speed: n }).then((next) => {
+  post("/api/speed", { speed: n, dragging: Boolean(isDragging), slider: sliderSpan() }).then((next) => {
     if (dragging) {
       if (state) state.speed = next.speed;
+      paintSpeed(next.speed);
       return;
     }
     paint(next);
@@ -387,20 +397,26 @@ function sendSpeed() {
 
 speed.addEventListener("pointerdown", () => {
   dragging = true;
-  sendSpeed();
+  sendSpeed(true);
 });
 speed.addEventListener("input", () => {
   paintSpeed(speed.value);
   clearTimeout(speedTimer);
-  speedTimer = setTimeout(sendSpeed, 30);
+  speedTimer = setTimeout(() => sendSpeed(dragging), 30);
 });
 speed.addEventListener("change", () => {
   dragging = false;
   clearTimeout(speedTimer);
-  sendSpeed();
+  sendSpeed(false);
 });
-speed.addEventListener("pointerup", () => { dragging = false; });
-speed.addEventListener("pointercancel", () => { dragging = false; });
+speed.addEventListener("pointerup", () => {
+  dragging = false;
+  sendSpeed(false);
+});
+speed.addEventListener("pointercancel", () => {
+  dragging = false;
+  sendSpeed(false);
+});
 
 let alertTimer = null;
 
