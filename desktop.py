@@ -6,6 +6,7 @@ import ctypes
 import os
 import shutil
 import subprocess
+import sys
 import time
 from ctypes import wintypes
 from pathlib import Path
@@ -178,6 +179,135 @@ def _open_browser(executable: str, arguments: str) -> bool:
     return int(shell32.ShellExecuteW(None, "open", executable, arguments, None, 1)) > 32
 
 
+class _GUID(ctypes.Structure):
+    _fields_ = (
+        ("Data1", ctypes.c_ulong),
+        ("Data2", ctypes.c_ushort),
+        ("Data3", ctypes.c_ushort),
+        ("Data4", ctypes.c_ubyte * 8),
+    )
+
+
+class _PROPERTYKEY(ctypes.Structure):
+    _fields_ = (("fmtid", _GUID), ("pid", ctypes.c_ulong))
+
+
+class _PROPVARIANT(ctypes.Structure):
+    _fields_ = (
+        ("vt", ctypes.c_ushort),
+        ("r1", ctypes.c_ushort),
+        ("r2", ctypes.c_ushort),
+        ("r3", ctypes.c_ushort),
+        ("data", ctypes.c_void_p),
+    )
+
+
+def _guid(data1: int, data2: int, data3: int, data4: tuple[int, ...]) -> _GUID:
+    value = _GUID()
+    value.Data1 = data1
+    value.Data2 = data2
+    value.Data3 = data3
+    value.Data4 = (ctypes.c_ubyte * 8)(*data4)
+    return value
+
+
+_WINDOW_ICONS: tuple[int, int] | None = None
+_BRANDED: set[int] = set()
+
+
+def _icon_file() -> str:
+    if getattr(sys, "frozen", False):
+        return sys.executable
+    return str(Path(__file__).resolve().parent / "autotyper.ico")
+
+
+def _window_icons() -> tuple[int, int]:
+    global _WINDOW_ICONS
+    if _WINDOW_ICONS:
+        return _WINDOW_ICONS
+    shell32 = ctypes.WinDLL("shell32", use_last_error=True)
+    shell32.ExtractIconExW.argtypes = [
+        ctypes.c_wchar_p,
+        ctypes.c_int,
+        ctypes.POINTER(ctypes.c_void_p),
+        ctypes.POINTER(ctypes.c_void_p),
+        ctypes.c_uint,
+    ]
+    shell32.ExtractIconExW.restype = ctypes.c_uint
+    big = ctypes.c_void_p()
+    small = ctypes.c_void_p()
+    if not shell32.ExtractIconExW(_icon_file(), 0, ctypes.byref(big), ctypes.byref(small), 1):
+        return (0, 0)
+    _WINDOW_ICONS = (int(big.value or 0), int(small.value or 0))
+    return _WINDOW_ICONS
+
+
+def _brand_window(hwnd: int) -> None:
+    if hwnd in _BRANDED:
+        return
+    shell32 = ctypes.WinDLL("shell32", use_last_error=True)
+    shell32.SHGetPropertyStoreForWindow.argtypes = [
+        ctypes.c_void_p,
+        ctypes.POINTER(_GUID),
+        ctypes.POINTER(ctypes.c_void_p),
+    ]
+    shell32.SHGetPropertyStoreForWindow.restype = ctypes.c_long
+    store = ctypes.c_void_p()
+    iid = _guid(0x886D8EEB, 0x8CF2, 0x4446, (0x8D, 0x02, 0xCD, 0xBA, 0x1D, 0xBD, 0xCF, 0x99))
+    if shell32.SHGetPropertyStoreForWindow(hwnd, ctypes.byref(iid), ctypes.byref(store)) < 0 or not store:
+        return
+    header = ctypes.cast(store, ctypes.POINTER(ctypes.c_void_p))[0]
+    methods = ctypes.cast(header, ctypes.POINTER(ctypes.c_void_p))
+    set_value = ctypes.WINFUNCTYPE(
+        ctypes.c_long,
+        ctypes.c_void_p,
+        ctypes.POINTER(_PROPERTYKEY),
+        ctypes.POINTER(_PROPVARIANT),
+    )(methods[6])
+    commit = ctypes.WINFUNCTYPE(ctypes.c_long, ctypes.c_void_p)(methods[7])
+    release = ctypes.WINFUNCTYPE(ctypes.c_ulong, ctypes.c_void_p)(methods[2])
+    key = _PROPERTYKEY()
+    key.fmtid = _guid(0x9F4C2855, 0x9F79, 0x4B39, (0xA8, 0xD0, 0xE1, 0xD4, 0x2D, 0xE1, 0xD5, 0xF3))
+    held: list[ctypes.Array] = []
+
+    def put(pid: int, text: str) -> None:
+        key.pid = pid
+        buffer = ctypes.create_unicode_buffer(text)
+        held.append(buffer)
+        variant = _PROPVARIANT()
+        variant.vt = 31
+        variant.data = ctypes.cast(buffer, ctypes.c_void_p)
+        set_value(store, ctypes.byref(key), ctypes.byref(variant))
+
+    source = _icon_file()
+    icon_resource = source if source.lower().endswith(".ico") else source + ",0"
+    put(5, "AutoTyper.Window")
+    put(4, "Auto Typer")
+    put(3, icon_resource)
+    commit(store)
+    release(store)
+    _BRANDED.add(hwnd)
+
+
+def apply_window_icon(hwnd: int) -> None:
+    if not hwnd:
+        return
+    try:
+        _brand_window(int(hwnd))
+        big, small = _window_icons()
+        if not big and not small:
+            return
+        user32 = ctypes.WinDLL("user32", use_last_error=True)
+        user32.SendMessageW.argtypes = [ctypes.c_void_p, ctypes.c_uint, ctypes.c_size_t, ctypes.c_ssize_t]
+        user32.SendMessageW.restype = ctypes.c_ssize_t
+        if big:
+            user32.SendMessageW(hwnd, 0x0080, 1, big)
+        if small:
+            user32.SendMessageW(hwnd, 0x0080, 0, small)
+    except Exception:
+        return
+
+
 def _place_on_screen(hwnd: int, on_top: bool) -> None:
     user32 = _user32()
     user32.ShowWindow.argtypes = [ctypes.c_void_p, ctypes.c_int]
@@ -195,6 +325,7 @@ def _place_on_screen(hwnd: int, on_top: bool) -> None:
         0x0040,
     )
     user32.SetForegroundWindow(hwnd)
+    apply_window_icon(hwnd)
 
 
 def set_topmost(enabled: bool) -> None:
@@ -336,6 +467,7 @@ def _keep_large_enough(stop: list[bool]) -> None:
     user32.MsgWaitForMultipleObjects.restype = ctypes.c_uint
     edges = {"left": False, "right": False, "top": False, "bottom": False}
     sizing = {"on": False}
+    icon_due = 0.0
 
     user32.GetAncestor.argtypes = [ctypes.c_void_p, ctypes.c_uint]
     user32.GetAncestor.restype = ctypes.c_void_p
@@ -399,6 +531,10 @@ def _keep_large_enough(stop: list[bool]) -> None:
                 _snap_minimum(user32, int(APP_HWND or 0), edges)
             elif not button_down:
                 _snap_minimum(user32, int(APP_HWND or 0), None)
+            now = time.monotonic()
+            if now >= icon_due:
+                apply_window_icon(int(APP_HWND or 0))
+                icon_due = now + 1.0
     finally:
         user32.ClipCursor(None)
         if hook:
