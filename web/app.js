@@ -84,6 +84,30 @@ function keepCaretInEditableText() {
   ignoreSelection = false;
 }
 
+function followTyping() {
+  if (!state || state.phase !== "typing") return;
+  const mark = highlight.querySelector(".caret");
+  if (!mark) return;
+  const view = highlight.getBoundingClientRect();
+  const box = mark.getBoundingClientRect();
+  const line = parseFloat(getComputedStyle(highlight).lineHeight) || 25;
+  const topEdge = box.top - line + 4;
+  const bottomEdge = box.bottom + 6;
+  let top = highlight.scrollTop;
+  let left = highlight.scrollLeft;
+  if (bottomEdge > view.bottom - 40) top += bottomEdge - (view.bottom - 40);
+  else if (topEdge < view.top + 12) top -= (view.top + 12) - topEdge;
+  if (box.right > view.right - 28) left += box.right - (view.right - 28);
+  else if (box.left < view.left + 16) left -= (view.left + 16) - box.left;
+  top = Math.max(0, top);
+  left = Math.max(0, left);
+  if (Math.abs(top - highlight.scrollTop) < 1 && Math.abs(left - highlight.scrollLeft) < 1) return;
+  highlight.scrollTop = top;
+  highlight.scrollLeft = left;
+  text.scrollTop = top;
+  text.scrollLeft = left;
+}
+
 function paint(next) {
   state = next;
   phaseEl.textContent = label(next.phase);
@@ -124,6 +148,7 @@ function paint(next) {
   rememberText(text.value, index);
   renderHighlight(text.value, index, typo);
   keepCaretInEditableText();
+  followTyping();
   paintSpeed(next.speed);
   const s = next.settings;
   let status = "";
