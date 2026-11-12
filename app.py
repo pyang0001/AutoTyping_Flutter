@@ -234,10 +234,14 @@ def main() -> None:
         if os.environ.get("AUTOTYPER_EDGE") == "1" or not _run_webview(local):
             import desktop
 
-            if not desktop.run_edge_window(local, bool(ENGINE.settings.get("always_on_top"))):
+            if not desktop.run_edge_window(
+                local,
+                bool(ENGINE.settings.get("always_on_top")),
+                on_ready=ENGINE.start_hotkeys,
+            ):
                 ctypes.windll.user32.MessageBoxW(
                     None,
-                    "Install Microsoft Edge to open the Auto Typer window.",
+                    "Auto Typer could not open its window.",
                     f"Auto Typer {VERSION}",
                     0,
                 )

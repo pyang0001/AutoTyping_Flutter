@@ -73,6 +73,51 @@ def _title(user32, hwnd: int) -> str:
     return buffer.value
 
 
+def _image_path(pid: int) -> str:
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel32.OpenProcess.argtypes = [ctypes.c_ulong, ctypes.c_bool, ctypes.c_ulong]
+    kernel32.OpenProcess.restype = ctypes.c_void_p
+    kernel32.CloseHandle.argtypes = [ctypes.c_void_p]
+    kernel32.QueryFullProcessImageNameW.argtypes = [
+        ctypes.c_void_p,
+        ctypes.c_ulong,
+        ctypes.c_wchar_p,
+        ctypes.POINTER(ctypes.c_ulong),
+    ]
+    kernel32.QueryFullProcessImageNameW.restype = ctypes.c_bool
+    handle = kernel32.OpenProcess(0x1000, False, pid)
+    if not handle:
+        return ""
+    try:
+        size = ctypes.c_ulong(1024)
+        buffer = ctypes.create_unicode_buffer(1024)
+        if not kernel32.QueryFullProcessImageNameW(handle, 0, buffer, ctypes.byref(size)):
+            return ""
+        return buffer.value
+    finally:
+        kernel32.CloseHandle(handle)
+
+
+def _browser_window() -> int:
+    user32 = _user32()
+    found: list[int] = []
+
+    def visit(hwnd, _lparam):
+        if not user32.IsWindowVisible(hwnd):
+            return True
+        if _title(user32, hwnd) != "Auto Typer":
+            return True
+        pid = ctypes.c_ulong()
+        user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
+        image = _image_path(pid.value).lower()
+        if image.endswith("\\msedge.exe") or image.endswith("\\chrome.exe"):
+            found.append(int(hwnd))
+        return True
+
+    user32.EnumWindows(_ENUM(visit), None)
+    return found[-1] if found else 0
+
+
 def _profile_pids(token: str) -> set[int]:
     command = (
         "Get-CimInstance Win32_Process | "
@@ -131,6 +176,25 @@ def _open_browser(executable: str, arguments: str) -> bool:
     return int(shell32.ShellExecuteW(None, "open", executable, arguments, None, 1)) > 32
 
 
+def _place_on_screen(hwnd: int, on_top: bool) -> None:
+    user32 = _user32()
+    user32.ShowWindow.argtypes = [ctypes.c_void_p, ctypes.c_int]
+    user32.ShowWindow.restype = ctypes.c_bool
+    user32.SetForegroundWindow.argtypes = [ctypes.c_void_p]
+    user32.SetForegroundWindow.restype = ctypes.c_bool
+    user32.ShowWindow(hwnd, 9)
+    user32.SetWindowPos(
+        hwnd,
+        ctypes.c_void_p(-1 if on_top else 0),
+        100,
+        80,
+        1040,
+        660,
+        0x0040,
+    )
+    user32.SetForegroundWindow(hwnd)
+
+
 def set_topmost(enabled: bool) -> None:
     if not APP_HWND:
         return
@@ -162,12 +226,14 @@ def set_run_style(active: bool) -> None:
     user32.SetWindowPos(APP_HWND, None, 0, 0, 0, 0, 0x0001 | 0x0002 | 0x0004 | 0x0010 | 0x0020)
 
 
-def _keep_large_enough(hwnd: int, stop: list[bool]) -> None:
+def _keep_large_enough(stop: list[bool]) -> None:
     user32 = _user32()
     rect = wintypes.RECT()
     while not stop[0]:
-        if not user32.IsWindow(hwnd):
-            return
+        hwnd = APP_HWND
+        if not hwnd or not user32.IsWindow(hwnd):
+            time.sleep(0.2)
+            continue
         if user32.GetWindowRect(hwnd, ctypes.byref(rect)):
             width = rect.right - rect.left
             height = rect.bottom - rect.top
@@ -184,58 +250,76 @@ def _keep_large_enough(hwnd: int, stop: list[bool]) -> None:
         time.sleep(0.2)
 
 
-def run_edge_window(url: str, on_top: bool) -> bool:
-    global APP_HWND
-    executable = browser_path()
-    if executable is None:
-        return False
-    profile = Path(os.environ.get("LOCALAPPDATA", ".")) / "AutoTyper" / "autotyper-shell"
+def _launch_profile(executable: str, url: str, folder: str) -> int:
+    profile = Path(os.environ.get("LOCALAPPDATA", ".")) / "AutoTyper" / folder
+    profile.mkdir(parents=True, exist_ok=True)
     arguments = " ".join(
         [
             f"--app={url}",
             f'--user-data-dir="{profile}"',
             "--window-size=1040,660",
+            "--window-position=100,80",
             "--no-first-run",
             "--no-default-browser-check",
         ]
     )
-    hwnd = 0
-    for attempt in range(2):
-        profile.mkdir(parents=True, exist_ok=True)
-        if not _open_browser(executable, arguments):
-            return False
-        deadline = time.monotonic() + 12
-        while time.monotonic() < deadline and not hwnd:
-            hwnd = _window_for_pids(_profile_pids("autotyper-shell"))
-            if not hwnd:
-                time.sleep(0.4)
+    if not _open_browser(executable, arguments):
+        return 0
+    deadline = time.monotonic() + 15
+    while time.monotonic() < deadline:
+        hwnd = _window_for_pids(_profile_pids(folder))
         if hwnd:
-            break
-        shutil.rmtree(profile, ignore_errors=True)
+            return hwnd
+        time.sleep(0.3)
+    return 0
+
+
+def run_edge_window(url: str, on_top: bool, on_ready=None) -> bool:
+    global APP_HWND
+    executable = browser_path()
+    if executable is None:
+        return False
+    folder = "app-window"
+    hwnd = _launch_profile(executable, url, folder)
+    if not hwnd:
+        profile = Path(os.environ.get("LOCALAPPDATA", ".")) / "AutoTyper" / folder
+        broken = profile.with_name(folder + "-reset")
+        shutil.rmtree(broken, ignore_errors=True)
+        try:
+            if profile.exists():
+                profile.rename(broken)
+        except OSError:
+            shutil.rmtree(profile, ignore_errors=True)
+        hwnd = _launch_profile(executable, url, folder)
     if not hwnd:
         return False
     APP_HWND = hwnd
-    set_topmost(on_top)
+    _place_on_screen(hwnd, on_top)
+    if on_ready is not None:
+        on_ready()
     stop = [False]
     import threading
 
-    threading.Thread(target=_keep_large_enough, args=(hwnd, stop), name="window-size", daemon=True).start()
+    threading.Thread(target=_keep_large_enough, args=(stop,), name="window-size", daemon=True).start()
     user32 = _user32()
+    missing_since = 0.0
     while True:
-        if user32.IsWindow(hwnd):
+        current = hwnd if user32.IsWindow(hwnd) else 0
+        if not current:
+            current = _browser_window()
+        if current:
+            if current != hwnd:
+                hwnd = current
+                APP_HWND = hwnd
+                _place_on_screen(hwnd, on_top)
+            missing_since = 0.0
             time.sleep(0.3)
             continue
-        replacement = 0
-        again = time.monotonic() + 4
-        while time.monotonic() < again and not replacement:
-            replacement = _window_for_pids(_profile_pids("autotyper-shell"))
-            if not replacement:
-                time.sleep(0.4)
-        if not replacement:
+        if not missing_since:
+            missing_since = time.monotonic()
+        if time.monotonic() - missing_since > 8:
             break
-        hwnd = replacement
-        APP_HWND = hwnd
-        set_topmost(on_top)
+        time.sleep(0.3)
     stop[0] = True
     APP_HWND = 0
     return True

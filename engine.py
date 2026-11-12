@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import math
+import os
 import random
 import sys
 import threading
@@ -150,11 +151,16 @@ class TyperEngine:
         self._lock = threading.Lock()
         self._hotkeys_suspended = False
         self._hotkey_thread = None
-        if sys.platform == "win32":
-            self._hotkey_thread = threading.Thread(
-                target=self._hotkey_loop, name="hotkeys", daemon=True
-            )
-            self._hotkey_thread.start()
+        if os.environ.get("AUTOTYPER_EDGE") != "1":
+            self.start_hotkeys()
+
+    def start_hotkeys(self) -> None:
+        if sys.platform != "win32" or self._hotkey_thread is not None:
+            return
+        self._hotkey_thread = threading.Thread(
+            target=self._hotkey_loop, name="hotkeys", daemon=True
+        )
+        self._hotkey_thread.start()
 
     def snapshot(self) -> dict:
         with self._lock:
